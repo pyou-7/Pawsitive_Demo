@@ -1,0 +1,103 @@
+// Pawsitive Backend Schema
+// Using PostgreSQL via Supabase
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== ENUMS ====================
+
+enum ActivityType {
+  WALK
+  MEAL
+  SYMPTOM_CHECK
+}
+
+enum CarePlanStatus {
+  ACTIVE
+  COMPLETED
+  MISSED
+}
+
+// ==================== TABLES ====================
+
+// Owner table - stores authenticated users
+model Owner {
+  id        String   @id @default(uuid())
+  authId    String   @unique // From Clerk/Supabase Auth
+  email     String   @unique
+  name      String?
+  xpBalance Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  pets Pet[]
+
+  @@map("owners")
+}
+
+// Pet table - AI-analyzed pet profiles
+model Pet {
+  id            String   @id @default(uuid())
+  ownerId       String
+  name          String
+  breed         String?
+  weightLbs     Float?
+  ageYears      Int?
+  photoUrl      String?
+  currentStreak Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  owner        Owner         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  activityLogs ActivityLog[]
+  carePlans    CarePlan[]
+
+  @@index([ownerId])
+  @@map("pets")
+}
+
+// ActivityLog table - transactional ledger for daily events
+model ActivityLog {
+  id            String       @id @default(uuid())
+  petId         String
+  activityType  ActivityType
+  value         Float        // duration in minutes, cups of food, etc.
+  notes         String?
+  loggedAt      DateTime     @default(now())
+  createdAt     DateTime     @default(now())
+
+  // Relations
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId])
+  @@index([petId, loggedAt])
+  @@map("activity_logs")
+}
+
+// CarePlan table - AI-generated daily recommendations
+model CarePlan {
+  id                  String         @id @default(uuid())
+  petId               String
+  date                DateTime
+  targetExerciseMins  Int
+  targetCalories      Int
+  aiInsightText       String?
+  status              CarePlanStatus @default(ACTIVE)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  // Relations
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@unique([petId, date])
+  @@index([petId])
+  @@map("care_plans")
+}
