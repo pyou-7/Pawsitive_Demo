@@ -2,12 +2,14 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 
 const SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
 
 export default function Navbar() {
   const { owner, loading, signInWithGithub, signOut } = useAuth();
+  const router = useRouter();
 
   return (
     <nav
