@@ -119,7 +119,7 @@ export default function Navbar() {
                   whileHover={{ scale: 1.04, y: -2 }}
                   whileTap={{ scale: 0.96 }}
                   transition={SPRING}
-                  onClick={signInWithGithub}
+                  onClick={() => router.push("/dashboard")}
                   className="font-bold text-white rounded-full"
                   style={{
                     backgroundColor: "#4a9068",
