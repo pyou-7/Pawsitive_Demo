@@ -1,34 +1,63 @@
+import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-export function middleware(request: NextRequest) {
-    // Check for the x-owner-id header, which our client sends
-    const ownerId = request.headers.get('x-owner-id');
+export async function middleware(request: NextRequest) {
+  // Skip middleware for non-API routes
+  if (!request.nextUrl.pathname.startsWith('/api/')) {
+    return NextResponse.next();
+  }
 
-    // We are verifying that an owner ID exists.
-    // In a production app, we would verify a Supabase session JWT here.
-    // We allow "demo" for hackathon judging fallback.
-    if (!ownerId && !request.nextUrl.pathname.startsWith('/api/auth')) {
-        return NextResponse.json(
-            { error: 'Unauthorized. Please provide x-owner-id header or login to demo mode.' },
-            { status: 401 }
-        );
-    }
+  // Public API routes - no auth required
+  const publicRoutes = ['/api/auth/callback', '/api/health'];
+  if (publicRoutes.some(route => request.nextUrl.pathname.startsWith(route))) {
+    return NextResponse.next();
+  }
 
-    // Clone headers to pass the validated owner ID to the handlers securely
-    const requestHeaders = new Headers(request.headers);
-    if (ownerId) {
-        requestHeaders.set('x-owner-id', ownerId);
-    }
-
-    return NextResponse.next({
-        request: {
-            headers: requestHeaders,
+  // Create Supabase client to verify session
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
         },
-    });
+        setAll() {
+          // Not needed for middleware
+        },
+      },
+    }
+  );
+
+  // Verify the user's session
+  const { data: { session }, error } = await supabase.auth.getSession();
+
+  if (error || !session) {
+    return NextResponse.json(
+      { error: 'Unauthorized - Please sign in via GitHub OAuth' },
+      { status: 401 }
+    );
+  }
+
+  // Add user info to headers for API handlers
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-owner-id', session.user.id);
+  requestHeaders.set('x-user-email', session.user.email || '');
+
+  return NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  });
 }
 
-// Only run middleware on protected API routes
+// Apply middleware only to protected API routes
 export const config = {
-    matcher: ['/api/pets/:path*', '/api/activity-logs/:path*', '/api/care-plans/:path*', '/api/owners/me/stats'],
+  matcher: [
+    '/api/pets/:path*',
+    '/api/activity-logs/:path*',
+    '/api/care-plans/:path*',
+    '/api/owner/stats/:path*',
+  ],
 };

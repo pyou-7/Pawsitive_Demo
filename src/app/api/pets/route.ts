@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { detectBreedFromImage } from '@/lib/gemini';
+import { z } from 'zod';
+
+const createPetSchema = z.object({
+  name: z.string().min(1, 'Pet name is required').max(100),
+  photoUrl: z.string().url().optional().nullable(),
+  breed: z.string().max(100).optional().nullable(),
+  weightLbs: z.number().positive().max(500).optional().nullable(),
+  ageYears: z.number().int().min(0).max(30).optional().nullable(),
+});
 
 // GET /api/pets - Get all pets for the authenticated owner
 export async function GET(request: NextRequest) {
@@ -40,11 +49,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, photoUrl, breed, weightLbs, ageYears } = body;
-
-    if (!name) {
-      return NextResponse.json({ error: 'Pet name is required' }, { status: 400 });
+    
+    // Validate request body with Zod
+    const validation = createPetSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: validation.error.flatten() },
+        { status: 422 }
+      );
     }
+
+    const { name, photoUrl, breed, weightLbs, ageYears } = validation.data;
 
     // If photo URL provided, run AI breed detection
     let aiData = null;
