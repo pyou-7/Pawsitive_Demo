@@ -58,6 +58,6 @@ export const config = {
     '/api/pets/:path*',
     '/api/activity-logs/:path*',
     '/api/care-plans/:path*',
-    '/api/owner/stats/:path*',
+    '/api/owners/me/stats',
   ],
 };
