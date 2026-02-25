@@ -66,19 +66,21 @@ model Pet {
 
 // ActivityLog table - transactional ledger for daily events
 model ActivityLog {
-  id            String       @id @default(uuid())
-  petId         String
-  activityType  ActivityType
-  value         Float        // duration in minutes, cups of food, etc.
-  notes         String?
-  loggedAt      DateTime     @default(now())
-  createdAt     DateTime     @default(now())
+  id              String       @id @default(uuid())
+  petId           String
+  activityType    ActivityType
+  value           Float        // duration in minutes, cups of food, etc.
+  notes           String?
+  idempotencyKey  String?
+  loggedAt        DateTime     @default(now())
+  createdAt       DateTime     @default(now())
 
   // Relations
   pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
 
   @@index([petId])
   @@index([petId, loggedAt])
+  @@unique([petId, activityType, idempotencyKey])
   @@map("activity_logs")
 }
 

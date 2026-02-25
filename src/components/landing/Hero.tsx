@@ -1,11 +1,14 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useAuth } from "@/lib/auth-context";
 
 const SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
 const SPRING_SLOW = { type: "spring", stiffness: 180, damping: 28 } as const;
 
 export default function Hero() {
+  const { signInWithGithub } = useAuth();
+
   return (
     <section
       className="relative pt-24 pb-16 md:pt-32 md:pb-24 overflow-hidden"
@@ -131,6 +134,7 @@ export default function Hero() {
 
             <div className="flex flex-col sm:flex-row gap-5 justify-center">
               <motion.button
+                onClick={signInWithGithub}
                 whileHover={{ scale: 1.04, y: -2 }}
                 whileTap={{ scale: 0.96 }}
                 transition={SPRING}
@@ -144,7 +148,7 @@ export default function Hero() {
                   border: "none",
                 }}
               >
-                Get Your Free AI Breed Profile
+                Get Started
               </motion.button>
 
               <motion.button

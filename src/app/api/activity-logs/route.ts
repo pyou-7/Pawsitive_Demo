@@ -1,5 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { z } from 'zod';
+
+const createLogSchema = z.object({
+  petId: z.string(),
+  activityType: z.enum(['WALK', 'MEAL', 'SYMPTOM_CHECK']),
+  value: z.number().min(0),
+  notes: z.string().optional().nullable(),
+  idempotencyKey: z.string().optional().nullable(),
+});
 
 // GET /api/activity-logs - Get activity logs for a pet
 export async function GET(request: NextRequest) {
@@ -52,11 +61,13 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { petId, activityType, value, notes, idempotencyKey } = body;
+    const parseResult = createLogSchema.safeParse(body);
 
-    if (!petId || !activityType || value === undefined) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    if (!parseResult.success) {
+      return NextResponse.json({ error: 'Validation failed', details: parseResult.error.format() }, { status: 400 });
     }
+
+    const { petId, activityType, value, notes, idempotencyKey } = parseResult.data;
 
     // Validate activity type
     const validTypes = ['WALK', 'MEAL', 'SYMPTOM_CHECK'];
@@ -79,7 +90,7 @@ export async function POST(request: NextRequest) {
         where: {
           petId,
           activityType: activityType as any,
-          notes: idempotencyKey,
+          idempotencyKey,
         },
       });
       if (existing) {
@@ -93,6 +104,7 @@ export async function POST(request: NextRequest) {
         activityType: activityType as any,
         value,
         notes: notes || null,
+        idempotencyKey: idempotencyKey || null,
       },
     });
 
@@ -102,7 +114,7 @@ export async function POST(request: NextRequest) {
       data: { xpBalance: { increment: 10 } },
     });
 
-    // Update streak
+    // Update streak AFTER log creation
     await updateStreak(petId);
 
     return NextResponse.json({ log });
@@ -120,35 +132,49 @@ async function updateStreak(petId: string) {
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
 
-  // Check if there's already an activity today
-  const todayActivity = await prisma.activityLog.findFirst({
+  // Check how many activities happened today.
+  // We just created one, so if count > 1, the streak increment was already handled today.
+  const todayActivitiesCount = await prisma.activityLog.count({
     where: {
       petId,
       loggedAt: { gte: today },
     },
   });
 
-  if (todayActivity) return; // Already logged today
+  if (todayActivitiesCount > 1) return; // Streak already handled
 
-  // Get last activity date
-  const lastActivity = await prisma.activityLog.findFirst({
-    where: { petId },
+  // This is the first activity of the day. Get the last activity BEFORE today:
+  const lastActivityBeforeToday = await prisma.activityLog.findFirst({
+    where: {
+      petId,
+      loggedAt: { lt: today }
+    },
     orderBy: { loggedAt: 'desc' },
   });
 
-  if (!lastActivity) return;
+  if (!lastActivityBeforeToday) {
+    // Very first activity ever logged for this pet
+    await prisma.pet.update({
+      where: { id: petId },
+      data: { currentStreak: 1 },
+    });
+    return;
+  }
 
-  const lastDate = new Date(lastActivity.loggedAt);
+  const lastDate = new Date(lastActivityBeforeToday.loggedAt);
   lastDate.setHours(0, 0, 0, 0);
 
-  const pet = await prisma.pet.findUnique({ where: { id: petId } });
-  if (!pet) return;
-
-  // If last activity was yesterday, increment streak
   if (lastDate.getTime() === yesterday.getTime()) {
+    // Last activity was yesterday, increment streak
     await prisma.pet.update({
       where: { id: petId },
       data: { currentStreak: { increment: 1 } },
+    });
+  } else {
+    // Streak broken, reset to 1
+    await prisma.pet.update({
+      where: { id: petId },
+      data: { currentStreak: 1 },
     });
   }
 }

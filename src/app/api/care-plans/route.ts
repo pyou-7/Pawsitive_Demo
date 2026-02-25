@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { generateCarePlan } from '@/lib/gemini';
+import { z } from 'zod';
+
+const generatePlanSchema = z.object({
+  petId: z.string().min(1),
+});
+
+// Simple in-memory rate limiter (5 requests per minute per owner)
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
 // GET /api/care-plans - Get care plans for a pet
 export async function GET(request: NextRequest) {
@@ -46,12 +54,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { petId } = body;
-
-    if (!petId) {
-      return NextResponse.json({ error: 'petId is required' }, { status: 400 });
+    // Basic Rate Limiting
+    const now = Date.now();
+    const limitRecord = rateLimitMap.get(ownerId) || { count: 0, resetAt: now + 60000 };
+    if (now > limitRecord.resetAt) {
+      limitRecord.count = 1;
+      limitRecord.resetAt = now + 60000;
+    } else {
+      limitRecord.count++;
     }
+    rateLimitMap.set(ownerId, limitRecord);
+
+    if (limitRecord.count > 5) {
+      return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 });
+    }
+
+    const body = await request.json();
+    const parseResult = generatePlanSchema.safeParse(body);
+
+    if (!parseResult.success) {
+      return NextResponse.json({ error: 'Validation failed', details: parseResult.error.format() }, { status: 400 });
+    }
+    const { petId } = parseResult.data;
 
     // Verify pet belongs to owner
     const pet = await prisma.pet.findFirst({

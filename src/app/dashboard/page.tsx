@@ -26,7 +26,7 @@ interface Stats {
 }
 
 export default function Dashboard() {
-  const { owner, loading: authLoading } = useAuth();
+  const { owner, loading: authLoading, signOut } = useAuth();
   const router = useRouter();
   const [pets, setPets] = useState<Pet[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -79,17 +79,37 @@ export default function Dashboard() {
     <div className="min-h-screen" style={{ backgroundColor: "#FDF8F3" }}>
       {/* Header */}
       <header className="pt-24 pb-8 px-4">
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-6xl mx-auto flex items-start justify-between">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={SPRING}
           >
-            <h1 className="text-3xl font-bold mb-2" style={{ color: "#1a1a2e", fontFamily: "var(--font-serif)" }}>
+            <h1 className="text-4xl font-bold mb-3 tracking-tight" style={{ color: "#1a1a2e", fontFamily: "var(--font-serif)" }}>
               Welcome back, {owner.name?.split(" ")[0] || "there"}! 🐾
             </h1>
-            <p style={{ color: "#4a5568" }}>Track your furry friend's health and happiness</p>
+            <p className="text-lg" style={{ color: "#4a5568" }}>Track your furry friend's health and happiness</p>
           </motion.div>
+
+          <motion.button
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...SPRING, delay: 0.1 }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              signOut();
+              router.push("/");
+            }}
+            className="px-5 py-2.5 rounded-full font-semibold text-sm shadow-sm transition-colors border"
+            style={{
+              backgroundColor: "#fff",
+              color: "#e53e3e",
+              borderColor: "#fed7d7"
+            }}
+          >
+            Log Out
+          </motion.button>
         </div>
       </header>
 

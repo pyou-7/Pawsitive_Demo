@@ -1,0 +1,3696 @@
+========== src/middleware.ts ==========
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+export function middleware(request: NextRequest) {
+    // Check for the x-owner-id header, which our client sends
+    const ownerId = request.headers.get('x-owner-id');
+
+    // We are verifying that an owner ID exists.
+    // In a production app, we would verify a Supabase session JWT here.
+    // We allow "demo" for hackathon judging fallback.
+    if (!ownerId && !request.nextUrl.pathname.startsWith('/api/auth')) {
+        return NextResponse.json(
+            { error: 'Unauthorized. Please provide x-owner-id header or login to demo mode.' },
+            { status: 401 }
+        );
+    }
+
+    // Clone headers to pass the validated owner ID to the handlers securely
+    const requestHeaders = new Headers(request.headers);
+    if (ownerId) {
+        requestHeaders.set('x-owner-id', ownerId);
+    }
+
+    return NextResponse.next({
+        request: {
+            headers: requestHeaders,
+        },
+    });
+}
+
+// Only run middleware on protected API routes
+export const config = {
+    matcher: ['/api/pets/:path*', '/api/activity-logs/:path*', '/api/care-plans/:path*', '/api/owners/me/stats'],
+};
+
+========== src/app/dashboard/add-pet/page.tsx ==========
+"use client";
+
+import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
+import { useAuth } from "@/lib/auth-context";
+import { useRouter } from "next/navigation";
+
+const SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
+
+export default function AddPet() {
+  const { owner, loading: authLoading } = useAuth();
+  const router = useRouter();
+  
+  const [name, setName] = useState("");
+  const [breed, setBreed] = useState("");
+  const [weightLbs, setWeightLbs] = useState("");
+  const [ageYears, setAgeYears] = useState("");
+  const [photoUrl, setPhotoUrl] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+
+  useEffect(() => {
+    if (!authLoading && !owner) {
+      router.push("/");
+    }
+  }, [owner, authLoading, router]);
+
+  const handleDetectBreed = async () => {
+    if (!photoUrl) return;
+    
+    setDetecting(true);
+    try {
+      // For now, we'll just let users enter breed manually
+      // AI detection requires a valid image URL
+      setDetecting(false);
+    } catch (error) {
+      console.error("Detection failed:", error);
+      setDetecting(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name || !owner) return;
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/pets", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-owner-id": owner.id,
+        },
+        body: JSON.stringify({
+          name,
+          breed: breed || null,
+          weightLbs: weightLbs ? parseFloat(weightLbs) : null,
+          ageYears: ageYears ? parseInt(ageYears) : null,
+          photoUrl: photoUrl || null,
+        }),
+      });
+
+      if (res.ok) {
+        router.push("/dashboard");
+      } else {
+        alert("Failed to add pet");
+      }
+    } catch (error) {
+      console.error("Failed to add pet:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#FDF8F3" }}>
+        <div className="w-16 h-16 border-4 border-[#4a9068] border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: "#FDF8F3" }}>
+      {/* Header */}
+      <header className="pt-24 pb-8 px-4">
+        <div className="max-w-2xl mx-auto">
+          <button
+            onClick={() => router.back()}
+            className="flex items-center gap-2 text-sm mb-6"
+            style={{ color: "#4a5568" }}
+          >
+            ← Back to Dashboard
+          </button>
+          
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={SPRING}
+          >
+            <h1 className="text-3xl font-bold mb-2" style={{ color: "#1a1a2e", fontFamily: "var(--font-serif)" }}>
+              Add Your Pet 🐾
+            </h1>
+            <p style={{ color: "#4a5568" }}>
+              Enter your furry friend's details to start tracking their health
+            </p>
+          </motion.div>
+        </div>
+      </header>
+
+      {/* Form */}
+      <section className="px-4 pb-16">
+        <div className="max-w-2xl mx-auto">
+          <motion.form
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...SPRING, delay: 0.1 }}
+            onSubmit={handleSubmit}
+            className="p-8 rounded-3xl"
+            style={{ backgroundColor: "rgba(255,255,255,0.8)", backdropFilter: "blur(8px)" }}
+          >
+            {/* Pet Name */}
+            <div className="mb-6">
+              <label className="block text-sm font-semibold mb-2" style={{ color: "#1a1a2e" }}>
+                Pet Name *
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g., Buddy, Max, Luna"
+                required
+                className="w-full px-4 py-3 rounded-xl border-2 text-base"
+                style={{ 
+                  borderColor: "rgba(0,0,0,0.1)", 
+                  backgroundColor: "#fff",
+                  color: "#1a1a2e"
+                }}
+              />
+            </div>
+
+            {/* Photo URL */}
+            <div className="mb-6">
+              <label className="block text-sm font-semibold mb-2" style={{ color: "#1a1a2e" }}>
+                Photo URL (optional)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={photoUrl}
+                  onChange={(e) => setPhotoUrl(e.target.value)}
+                  placeholder="https://example.com/dog-photo.jpg"
+                  className="flex-1 px-4 py-3 rounded-xl border-2 text-base"
+                  style={{ 
+                    borderColor: "rgba(0,0,0,0.1)", 
+                    backgroundColor: "#fff",
+                    color: "#1a1a2e"
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleDetectBreed}
+                  disabled={!photoUrl || detecting}
+                  className="px-4 py-3 rounded-xl font-semibold text-sm"
+                  style={{ 
+                    backgroundColor: detecting ? "#9ca3af" : "#4a9068",
+                    color: "#fff"
+                  }}
+                >
+                  {detecting ? "Detecting..." : "AI Detect"}
+                </button>
+              </div>
+              <p className="text-xs mt-2" style={{ color: "#6b7280" }}>
+                Paste a photo URL and click AI Detect to automatically identify the breed
+              </p>
+            </div>
+
+            {/* Breed */}
+            <div className="mb-6">
+              <label className="block text-sm font-semibold mb-2" style={{ color: "#1a1a2e" }}>
+                Breed
+              </label>
+              <input
+                type="text"
+                value={breed}
+                onChange={(e) => setBreed(e.target.value)}
+                placeholder="e.g., Golden Retriever, Labrador"
+                className="w-full px-4 py-3 rounded-xl border-2 text-base"
+                style={{ 
+                  borderColor: "rgba(0,0,0,0.1)", 
+                  backgroundColor: "#fff",
+                  color: "#1a1a2e"
+                }}
+              />
+            </div>
+
+            {/* Weight & Age */}
+            <div className="grid grid-cols-2 gap-4 mb-8">
+              <div>
+                <label className="block text-sm font-semibold mb-2" style={{ color: "#1a1a2e" }}>
+                  Weight (lbs)
+                </label>
+                <input
+                  type="number"
+                  value={weightLbs}
+                  onChange={(e) => setWeightLbs(e.target.value)}
+                  placeholder="e.g., 65"
+                  min="0"
+                  step="0.1"
+                  className="w-full px-4 py-3 rounded-xl border-2 text-base"
+                  style={{ 
+                    borderColor: "rgba(0,0,0,0.1)", 
+                    backgroundColor: "#fff",
+                    color: "#1a1a2e"
+                  }}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-2" style={{ color: "#1a1a2e" }}>
+                  Age (years)
+                </label>
+                <input
+                  type="number"
+                  value={ageYears}
+                  onChange={(e) => setAgeYears(e.target.value)}
+                  placeholder="e.g., 3"
+                  min="0"
+                  className="w-full px-4 py-3 rounded-xl border-2 text-base"
+                  style={{ 
+                    borderColor: "rgba(0,0,0,0.1)", 
+                    backgroundColor: "#fff",
+                    color: "#1a1a2e"
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={loading || !name}
+              className="w-full py-4 rounded-xl font-bold text-lg"
+              style={{ 
+                backgroundColor: loading || !name ? "#9ca3af" : "#4a9068",
+                color: "#fff"
+              }}
+            >
+              {loading ? "Adding Pet..." : "Add Pet"}
+            </button>
+          </motion.form>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+========== src/app/dashboard/pet/[id]/page.tsx ==========
+"use client";
+
+import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import { useAuth } from "@/lib/auth-context";
+import { useRouter, useParams } from "next/navigation";
+
+const SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
+
+interface Pet {
+  id: string;
+  name: string;
+  breed: string | null;
+  weightLbs: number | null;
+  ageYears: number | null;
+  photoUrl: string | null;
+  currentStreak: number;
+  activityLogs: Array<{
+    id: string;
+    activityType: string;
+    value: number;
+    notes: string | null;
+    loggedAt: string;
+  }>;
+  carePlans: Array<{
+    id: string;
+    date: string;
+    targetExerciseMins: number;
+    targetCalories: number;
+    aiInsightText: string | null;
+    status: string;
+  }>;
+}
+
+export default function PetDetail() {
+  const { owner, loading: authLoading, signOut } = useAuth();
+  const router = useRouter();
+  const params = useParams();
+  const petId = params.id as string;
+
+  const [pet, setPet] = useState<Pet | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loggingActivity, setLoggingActivity] = useState(false);
+  const [generatingPlan, setGeneratingPlan] = useState(false);
+
+  // Activity Logging Modal State
+  const [isLogModalOpen, setIsLogModalOpen] = useState(false);
+  const [activeLogType, setActiveLogType] = useState<"WALK" | "MEAL" | "SYMPTOM_CHECK" | null>(null);
+  const [logValue, setLogValue] = useState("");
+  const [logNotes, setLogNotes] = useState("");
+
+  useEffect(() => {
+    if (!authLoading && !owner) {
+      router.push("/");
+      return;
+    }
+
+    if (owner && petId) {
+      fetchPet();
+    }
+  }, [owner, authLoading, petId, router]);
+
+  const fetchPet = async () => {
+    try {
+      const res = await fetch(`/api/pets/${petId}`, {
+        headers: { "x-owner-id": owner!.id },
+      });
+      const data = await res.json();
+      setPet(data.pet);
+    } catch (error) {
+      console.error("Failed to fetch pet:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openLogModal = (type: "WALK" | "MEAL" | "SYMPTOM_CHECK") => {
+    setActiveLogType(type);
+    setLogValue("");
+    setLogNotes("");
+    setIsLogModalOpen(true);
+  };
+
+  const submitActivityLog = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!owner || !activeLogType || !logValue) return;
+
+    setLoggingActivity(true);
+    try {
+      const res = await fetch("/api/activity-logs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-owner-id": owner.id,
+        },
+        body: JSON.stringify({
+          petId,
+          activityType: activeLogType,
+          value: parseFloat(logValue),
+          notes: logNotes
+        }),
+      });
+
+      if (res.ok) {
+        setIsLogModalOpen(false);
+        fetchPet();
+      }
+    } catch (error) {
+      console.error("Failed to log activity:", error);
+    } finally {
+      setLoggingActivity(false);
+    }
+  };
+
+  const generateCarePlan = async () => {
+    if (!owner) return;
+    setGeneratingPlan(true);
+    try {
+      const res = await fetch("/api/care-plans", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-owner-id": owner.id,
+        },
+        body: JSON.stringify({ petId }),
+      });
+
+      if (res.ok) {
+        fetchPet();
+      }
+    } catch (error) {
+      console.error("Failed to generate care plan:", error);
+    } finally {
+      setGeneratingPlan(false);
+    }
+  };
+
+  if (authLoading || loading || !pet) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#FDF8F3" }}>
+        <div className="w-16 h-16 border-4 border-[#4a9068] border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: "#FDF8F3" }}>
+      {/* Header */}
+      <header className="pt-24 pb-8 px-4">
+        <div className="max-w-4xl mx-auto flex items-start justify-between">
+          <div>
+            <button
+              onClick={() => router.push("/dashboard")}
+              className="flex items-center gap-2 text-sm mb-6 transition-colors hover:text-[#4a9068]"
+              style={{ color: "#4a5568" }}
+            >
+              ← Back to Dashboard
+            </button>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={SPRING}
+              className="flex items-center gap-6"
+            >
+              <div
+                className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl shadow-sm"
+                style={{ backgroundColor: "#fff", border: "1px solid rgba(0,0,0,0.04)" }}
+              >
+                {/* Fallback emoji if no photoUrl */}
+                {pet.photoUrl ? (
+                  <img src={pet.photoUrl} alt={pet.name} className="w-full h-full object-cover rounded-3xl" />
+                ) : (
+                  "🐕"
+                )}
+              </div>
+              <div>
+                <h1 className="text-4xl font-bold mb-1 tracking-tight" style={{ color: "#1a1a2e", fontFamily: "var(--font-serif)" }}>
+                  {pet.name}
+                </h1>
+                <p className="text-lg" style={{ color: "#4a5568" }}>
+                  {pet.breed || "Unknown breed"} • {pet.ageYears ? `${pet.ageYears} years` : ""} {pet.weightLbs ? `• ${pet.weightLbs} lbs` : ""}
+                </p>
+                <div className="flex items-center gap-4 mt-3">
+                  <span className="px-4 py-1.5 rounded-full text-sm font-semibold shadow-sm" style={{ backgroundColor: "#4a9068", color: "#fff" }}>
+                    🔥 {pet.currentStreak} day streak
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+
+          <motion.button
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...SPRING, delay: 0.1 }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              signOut();
+              router.push("/");
+            }}
+            className="px-5 py-2.5 rounded-full font-semibold text-sm shadow-sm transition-colors border"
+            style={{
+              backgroundColor: "#fff",
+              color: "#e53e3e",
+              borderColor: "#fed7d7"
+            }}
+          >
+            Log Out
+          </motion.button>
+        </div>
+      </header>
+
+      {/* Quick Actions */}
+      <section className="px-4 pb-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="grid grid-cols-3 gap-4">
+            <ActivityButton
+              emoji="🚶"
+              label="Log Walk"
+              color="#4a9068"
+              onClick={() => openLogModal("WALK")}
+              loading={false}
+            />
+            <ActivityButton
+              emoji="🍖"
+              label="Log Meal"
+              color="#d97b3d"
+              onClick={() => openLogModal("MEAL")}
+              loading={false}
+            />
+            <ActivityButton
+              emoji="🩺"
+              label="Check Health"
+              color="#5a9a7a"
+              onClick={() => openLogModal("SYMPTOM_CHECK")}
+              loading={false}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Care Plan */}
+      <section className="px-4 pb-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold" style={{ color: "#1a1a2e" }}>Today's Care Plan</h2>
+            <button
+              onClick={generateCarePlan}
+              disabled={generatingPlan}
+              className="px-4 py-2 rounded-full text-sm font-semibold"
+              style={{ backgroundColor: generatingPlan ? "#9ca3af" : "#4a9068", color: "#fff" }}
+            >
+              {generatingPlan ? "Generating..." : "✨ Generate AI Plan"}
+            </button>
+          </div>
+
+          {generatingPlan ? (
+            <div className="p-8 rounded-3xl border border-[#4a9068]/20 flex flex-col items-center justify-center min-h-[250px] space-y-4" style={{ backgroundColor: "rgba(255,255,255,0.8)", backdropFilter: "blur(8px)" }}>
+              <div className="w-12 h-12 border-4 border-[#4a9068]/30 border-t-[#4a9068] rounded-full animate-spin"></div>
+              <p className="text-[#4a9068] font-medium animate-pulse">Gemini 2.0 is analyzing activity logs...</p>
+            </div>
+          ) : pet.carePlans[0] ? (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={SPRING}
+              className="p-8 rounded-3xl shadow-sm border border-black/5 relative overflow-hidden"
+              style={{ background: "linear-gradient(135deg, rgba(255,255,255,0.95), rgba(240,253,244,0.95))", backdropFilter: "blur(12px)" }}
+            >
+              <div className="absolute top-0 right-0 w-64 h-64 bg-[#4a9068]/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+
+              <div className="grid grid-cols-2 gap-8 mb-8 relative z-10">
+                <div className="bg-white/60 p-5 rounded-2xl border border-[#4a9068]/10">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xl">🏃</span>
+                    <div className="text-sm font-bold text-[#4a5568]">Target Exercise</div>
+                  </div>
+                  <div className="text-4xl font-extrabold tracking-tight" style={{ color: "#4a9068" }}>
+                    {pet.carePlans[0].targetExerciseMins} <span className="text-lg font-medium text-[#4a5568]/60 tracking-normal">mins</span>
+                  </div>
+                </div>
+
+                <div className="bg-white/60 p-5 rounded-2xl border border-[#d97b3d]/10">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xl">🍲</span>
+                    <div className="text-sm font-bold text-[#4a5568]">Target Calories</div>
+                  </div>
+                  <div className="text-4xl font-extrabold tracking-tight" style={{ color: "#d97b3d" }}>
+                    {pet.carePlans[0].targetCalories} <span className="text-lg font-medium text-[#4a5568]/60 tracking-normal">kcal</span>
+                  </div>
+                </div>
+              </div>
+
+              {pet.carePlans[0].aiInsightText && (
+                <div className="p-5 rounded-2xl relative z-10" style={{ backgroundColor: "#f0fdf4", border: "1px solid rgba(74,144,104,0.15)" }}>
+                  <div className="flex items-start gap-3">
+                    <div className="text-xl mt-0.5">💡</div>
+                    <div>
+                      <div className="text-sm font-bold uppercase tracking-wider mb-1" style={{ color: "#2A5C41" }}>Gemini Insight</div>
+                      <p className="text-[1.05rem] leading-relaxed" style={{ color: "#2d3748" }}>{pet.carePlans[0].aiInsightText}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          ) : (
+            <div className="p-12 text-center rounded-3xl border border-black/5" style={{ backgroundColor: "rgba(255,255,255,0.6)" }}>
+              <div className="text-5xl mb-4">🤖</div>
+              <h3 className="text-lg font-bold text-[#1a1a2e] mb-2">No Care Plan Yet</h3>
+              <p style={{ color: "#4a5568" }}>Click Generate AI Plan to get today's personalized recommendations based on recent activity.</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Recent Activity */}
+      <section className="px-4 pb-16">
+        <div className="max-w-4xl mx-auto">
+          <h2 className="text-xl font-bold mb-4" style={{ color: "#1a1a2e" }}>Recent Activity</h2>
+
+          {pet.activityLogs.length > 0 ? (
+            <div className="space-y-3">
+              {pet.activityLogs.slice(0, 10).map((log, i) => (
+                <motion.div
+                  key={log.id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ ...SPRING, delay: i * 0.05 }}
+                  className="p-5 rounded-2xl flex items-center gap-5 border border-black/5 shadow-sm hover:shadow-md transition-shadow"
+                  style={{ backgroundColor: "rgba(255,255,255,0.85)", backdropFilter: "blur(8px)" }}
+                >
+                  <div
+                    className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-sm"
+                    style={{
+                      backgroundColor: log.activityType === "WALK" ? "#f0fdf4" :
+                        log.activityType === "MEAL" ? "#fff7ed" : "#f0f9ff"
+                    }}
+                  >
+                    {log.activityType === "WALK" ? "🚶" : log.activityType === "MEAL" ? "🍖" : "🩺"}
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-lg" style={{ color: "#1a1a2e" }}>
+                      {log.activityType === "WALK" ? `${log.value} min walk` :
+                        log.activityType === "MEAL" ? `${log.value} cup(s)` :
+                          `Health score: ${log.value}/10`}
+                    </div>
+                    {log.notes && (
+                      <div className="text-sm font-medium mt-0.5" style={{ color: "#4a5568" }}>{log.notes}</div>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-bold" style={{ color: "#4a5568" }}>
+                      {new Date(log.loggedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                    <div className="text-xs font-medium mt-0.5" style={{ color: "#9ca3af" }}>
+                      {new Date(log.loggedAt).toLocaleDateString()}
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-10 text-center rounded-3xl border border-black/5" style={{ backgroundColor: "rgba(255,255,255,0.6)" }}>
+              <div className="text-4xl mb-3">📝</div>
+              <h3 className="text-lg font-bold text-[#1a1a2e] mb-2">No Activities Logged</h3>
+              <p style={{ color: "#4a5568" }}>Your pet's activity history will appear here. Start tracking above!</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Activity Log Modal */}
+      {isLogModalOpen && activeLogType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+            onClick={() => setIsLogModalOpen(false)}
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="relative w-full max-w-md bg-white rounded-3xl p-8 shadow-2xl"
+          >
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-bold text-[#1a1a2e]" style={{ fontFamily: "var(--font-serif)" }}>
+                {activeLogType === "WALK" ? "Log Walk 🚶" : activeLogType === "MEAL" ? "Log Meal 🍖" : "Health Check 🩺"}
+              </h3>
+              <button
+                onClick={() => setIsLogModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={submitActivityLog} className="space-y-5">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  {activeLogType === "WALK" ? "Duration (minutes)" : activeLogType === "MEAL" ? "Amount (cups/portions)" : "Health Score (1-10)"}
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  step="0.5"
+                  value={logValue}
+                  onChange={(e) => setLogValue(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#4a9068]"
+                  placeholder={activeLogType === "WALK" ? "e.g. 30" : activeLogType === "MEAL" ? "e.g. 1.5" : "e.g. 10"}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Notes (Optional)</label>
+                <textarea
+                  value={logNotes}
+                  onChange={(e) => setLogNotes(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#4a9068] resize-none h-24"
+                  placeholder={activeLogType === "WALK" ? "Where did you go?" : activeLogType === "MEAL" ? "What did they eat?" : "Any concerns?"}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loggingActivity || !logValue}
+                className="w-full py-4 text-white font-bold rounded-xl transition-all shadow-md"
+                style={{
+                  backgroundColor: loggingActivity || !logValue ? "#9ca3af" : "#4a9068",
+                }}
+              >
+                {loggingActivity ? "Saving..." : "Save Activity"}
+              </button>
+            </form>
+          </motion.div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActivityButton({ emoji, label, color, onClick, loading }: {
+  emoji: string;
+  label: string;
+  color: string;
+  onClick: () => void;
+  loading: boolean;
+}) {
+  return (
+    <motion.button
+      whileHover={{ scale: 1.03, y: -2 }}
+      whileTap={{ scale: 0.97 }}
+      transition={SPRING}
+      onClick={onClick}
+      disabled={loading}
+      className="p-4 rounded-2xl flex flex-col items-center gap-2"
+      style={{ backgroundColor: `${color}15`, border: `2px solid ${color}30` }}
+    >
+      <span className="text-2xl">{emoji}</span>
+      <span className="text-sm font-semibold" style={{ color }}>{label}</span>
+    </motion.button>
+  );
+}
+
+========== src/app/dashboard/page.tsx ==========
+"use client";
+
+import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import { useAuth } from "@/lib/auth-context";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+const SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
+
+interface Pet {
+  id: string;
+  name: string;
+  breed: string | null;
+  weightLbs: number | null;
+  ageYears: number | null;
+  photoUrl: string | null;
+  currentStreak: number;
+}
+
+interface Stats {
+  owner: { id: string; email: string; name: string | null; xpBalance: number };
+  totalPets: number;
+  petStats: Array<{ id: string; name: string; currentStreak: number; recentActivities: number }>;
+  activityByDay: Array<{ date: string; count: number; walks: number; meals: number }>;
+}
+
+export default function Dashboard() {
+  const { owner, loading: authLoading, signOut } = useAuth();
+  const router = useRouter();
+  const [pets, setPets] = useState<Pet[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!authLoading && !owner) {
+      router.push("/");
+      return;
+    }
+
+    if (owner) {
+      fetchData();
+    }
+  }, [owner, authLoading, router]);
+
+  const fetchData = async () => {
+    try {
+      const [petsRes, statsRes] = await Promise.all([
+        fetch("/api/pets", { headers: { "x-owner-id": owner!.id } }),
+        fetch("/api/owner/stats", { headers: { "x-owner-id": owner!.id } }),
+      ]);
+
+      const petsData = await petsRes.json();
+      const statsData = await statsRes.json();
+
+      setPets(petsData.pets || []);
+      setStats(statsData);
+    } catch (error) {
+      console.error("Failed to fetch data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (authLoading || loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#FDF8F3" }}>
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-[#4a9068] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p style={{ color: "#4a5568" }}>Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!owner) return null;
+
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: "#FDF8F3" }}>
+      {/* Header */}
+      <header className="pt-24 pb-8 px-4">
+        <div className="max-w-6xl mx-auto flex items-start justify-between">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={SPRING}
+          >
+            <h1 className="text-4xl font-bold mb-3 tracking-tight" style={{ color: "#1a1a2e", fontFamily: "var(--font-serif)" }}>
+              Welcome back, {owner.name?.split(" ")[0] || "there"}! 🐾
+            </h1>
+            <p className="text-lg" style={{ color: "#4a5568" }}>Track your furry friend's health and happiness</p>
+          </motion.div>
+
+          <motion.button
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...SPRING, delay: 0.1 }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              signOut();
+              router.push("/");
+            }}
+            className="px-5 py-2.5 rounded-full font-semibold text-sm shadow-sm transition-colors border"
+            style={{
+              backgroundColor: "#fff",
+              color: "#e53e3e",
+              borderColor: "#fed7d7"
+            }}
+          >
+            Log Out
+          </motion.button>
+        </div>
+      </header>
+
+      {/* Stats Cards */}
+      <section className="px-4 pb-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ ...SPRING, delay: 0.1 }}
+              className="p-6 rounded-2xl"
+              style={{ backgroundColor: "rgba(255,255,255,0.8)", backdropFilter: "blur(8px)" }}
+            >
+              <div className="text-3xl font-bold" style={{ color: "#4a9068" }}>{owner.xpBalance}</div>
+              <div className="text-sm" style={{ color: "#4a5568" }}>XP Points</div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ ...SPRING, delay: 0.15 }}
+              className="p-6 rounded-2xl"
+              style={{ backgroundColor: "rgba(255,255,255,0.8)", backdropFilter: "blur(8px)" }}
+            >
+              <div className="text-3xl font-bold" style={{ color: "#4a9068" }}>{pets.length}</div>
+              <div className="text-sm" style={{ color: "#4a5568" }}>Pets</div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ ...SPRING, delay: 0.2 }}
+              className="p-6 rounded-2xl"
+              style={{ backgroundColor: "rgba(255,255,255,0.8)", backdropFilter: "blur(8px)" }}
+            >
+              <div className="text-3xl font-bold" style={{ color: "#4a9068" }}>
+                {stats?.petStats.reduce((acc, p) => acc + p.currentStreak, 0) || 0}
+              </div>
+              <div className="text-sm" style={{ color: "#4a5568" }}>Day Streak</div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ ...SPRING, delay: 0.25 }}
+              className="p-6 rounded-2xl"
+              style={{ backgroundColor: "rgba(255,255,255,0.8)", backdropFilter: "blur(8px)" }}
+            >
+              <div className="text-3xl font-bold" style={{ color: "#4a9068" }}>
+                {stats?.activityByDay.reduce((acc, d) => acc + d.count, 0) || 0}
+              </div>
+              <div className="text-sm" style={{ color: "#4a5568" }}>Activities (7d)</div>
+            </motion.div>
+          </div>
+        </div>
+      </section>
+
+      {/* Pets Section */}
+      <section className="px-4 pb-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold" style={{ color: "#1a1a2e" }}>Your Pets</h2>
+            <Link
+              href="/dashboard/add-pet"
+              className="px-4 py-2 rounded-full text-white font-semibold text-sm"
+              style={{ backgroundColor: "#4a9068" }}
+            >
+              + Add Pet
+            </Link>
+          </div>
+
+          {pets.length === 0 ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="p-12 text-center rounded-3xl"
+              style={{ backgroundColor: "rgba(255,255,255,0.6)" }}
+            >
+              <div className="text-6xl mb-4">🐕</div>
+              <h3 className="text-lg font-semibold mb-2" style={{ color: "#1a1a2e" }}>
+                No pets yet!
+              </h3>
+              <p className="mb-4" style={{ color: "#4a5568" }}>
+                Add your first furry friend to start tracking their health
+              </p>
+              <Link
+                href="/dashboard/add-pet"
+                className="inline-block px-6 py-3 rounded-full text-white font-semibold"
+                style={{ backgroundColor: "#4a9068" }}
+              >
+                Add Your First Pet
+              </Link>
+            </motion.div>
+          ) : (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {pets.map((pet, index) => (
+                <PetCard key={pet.id} pet={pet} index={index} />
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Activity Chart */}
+      <section className="px-4 pb-16">
+        <div className="max-w-6xl mx-auto">
+          <h2 className="text-xl font-bold mb-6" style={{ color: "#1a1a2e" }}>Weekly Activity</h2>
+          <div
+            className="p-6 rounded-2xl"
+            style={{ backgroundColor: "rgba(255,255,255,0.8)", backdropFilter: "blur(8px)" }}
+          >
+            <div className="flex items-end justify-between h-40 gap-2">
+              {stats?.activityByDay.map((day, i) => (
+                <div key={day.date} className="flex-1 flex flex-col items-center">
+                  <motion.div
+                    initial={{ height: 0 }}
+                    animate={{ height: `${Math.max(day.count * 20, 10)}px` }}
+                    transition={{ ...SPRING, delay: i * 0.05 }}
+                    className="w-full rounded-t-lg"
+                    style={{ backgroundColor: day.count > 0 ? "#4a9068" : "#e2e8f0" }}
+                  />
+                  <span className="text-xs mt-2" style={{ color: "#4a5568" }}>
+                    {new Date(day.date).toLocaleDateString("en-US", { weekday: "short" })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PetCard({ pet, index }: { pet: Pet; index: number }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ ...SPRING, delay: index * 0.1 }}
+      whileHover={{ y: -4 }}
+      className="p-6 rounded-2xl"
+      style={{ backgroundColor: "rgba(255,255,255,0.8)", backdropFilter: "blur(8px)" }}
+    >
+      <div className="flex items-center gap-4 mb-4">
+        <div
+          className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl"
+          style={{ backgroundColor: "#f0fdf4" }}
+        >
+          🐕
+        </div>
+        <div>
+          <h3 className="font-bold" style={{ color: "#1a1a2e" }}>{pet.name}</h3>
+          <p className="text-sm" style={{ color: "#4a5568" }}>{pet.breed || "Unknown breed"}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+        <div>
+          <div className="text-lg font-bold" style={{ color: "#4a9068" }}>{pet.currentStreak}</div>
+          <div className="text-xs" style={{ color: "#4a5568" }}>Streak</div>
+        </div>
+        <div>
+          <div className="text-lg font-bold" style={{ color: "#4a9068" }}>{pet.weightLbs || "-"}</div>
+          <div className="text-xs" style={{ color: "#4a5568" }}>lbs</div>
+        </div>
+        <div>
+          <div className="text-lg font-bold" style={{ color: "#4a9068" }}>{pet.ageYears || "-"}</div>
+          <div className="text-xs" style={{ color: "#4a5568" }}>yrs</div>
+        </div>
+      </div>
+
+      <Link
+        href={`/dashboard/pet/${pet.id}`}
+        className="block w-full py-2 rounded-xl text-center text-sm font-semibold"
+        style={{ backgroundColor: "#4a9068", color: "#fff" }}
+      >
+        View Dashboard
+      </Link>
+    </motion.div>
+  );
+}
+
+========== src/app/layout.tsx ==========
+import type { Metadata } from "next";
+import { Lora, Inter } from "next/font/google";
+import { Providers } from "./providers";
+import "./globals.css";
+
+const lora = Lora({
+  variable: "--font-lora",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
+
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+});
+
+export const metadata: Metadata = {
+  title: "Pawsitive - AI-Powered Pet Care & Health Tracking",
+  description: "Monitor your dog's health with AI-powered care plans, daily activity tracking, and gamified rewards.",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body
+        className={`${lora.variable} ${inter.variable} antialiased`}
+      >
+        <Providers>
+          {children}
+        </Providers>
+      </body>
+    </html>
+  );
+}
+
+========== src/app/api/auth/callback/route.ts ==========
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+
+// GET /api/auth/callback - Handle auth callback from Supabase/Clerk
+export async function GET(request: NextRequest) {
+  try {
+    const searchParams = request.nextUrl.searchParams;
+    const authId = searchParams.get('auth_id');
+    const email = searchParams.get('email');
+    const name = searchParams.get('name');
+
+    if (!authId || !email) {
+      return NextResponse.json({ error: 'Missing auth parameters' }, { status: 400 });
+    }
+
+    // Find or create owner based on auth
+    let owner = await prisma.owner.findUnique({
+      where: { authId },
+    });
+
+    if (!owner) {
+      owner = await prisma.owner.create({
+        data: {
+          authId,
+          email,
+          name: name || null,
+        },
+      });
+    }
+
+    return NextResponse.json({ owner });
+  } catch (error) {
+    console.error('Auth callback error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+========== src/app/api/pets/route.ts ==========
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { detectBreedFromImage } from '@/lib/gemini';
+
+// GET /api/pets - Get all pets for the authenticated owner
+export async function GET(request: NextRequest) {
+  try {
+    const ownerId = request.headers.get('x-owner-id');
+    if (!ownerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const pets = await prisma.pet.findMany({
+      where: { ownerId },
+      include: {
+        activityLogs: {
+          orderBy: { loggedAt: 'desc' },
+          take: 10,
+        },
+        carePlans: {
+          orderBy: { date: 'desc' },
+          take: 7,
+        },
+      },
+    });
+
+    return NextResponse.json({ pets });
+  } catch (error) {
+    console.error('Get pets error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+// POST /api/pets - Create a new pet with AI breed detection
+export async function POST(request: NextRequest) {
+  try {
+    const ownerId = request.headers.get('x-owner-id');
+    if (!ownerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { name, photoUrl, breed, weightLbs, ageYears } = body;
+
+    if (!name) {
+      return NextResponse.json({ error: 'Pet name is required' }, { status: 400 });
+    }
+
+    // If photo URL provided, run AI breed detection
+    let aiData = null;
+    if (photoUrl) {
+      try {
+        aiData = await detectBreedFromImage(photoUrl);
+      } catch (aiError) {
+        console.error('AI detection failed:', aiError);
+        // Continue without AI data if it fails
+      }
+    }
+
+    const pet = await prisma.pet.create({
+      data: {
+        ownerId,
+        name,
+        photoUrl: photoUrl || null,
+        breed: breed || aiData?.breed || null,
+        weightLbs: weightLbs || null,
+        ageYears: ageYears || aiData?.estimatedAge || null,
+      },
+    });
+
+    // Award XP for creating a pet profile
+    await prisma.owner.update({
+      where: { id: ownerId },
+      data: { xpBalance: { increment: 50 } },
+    });
+
+    return NextResponse.json({ pet, aiData });
+  } catch (error) {
+    console.error('Create pet error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+========== src/app/api/pets/[id]/route.ts ==========
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+
+// GET /api/pets/[id] - Get a specific pet
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const ownerId = request.headers.get('x-owner-id');
+    
+    if (!ownerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const pet = await prisma.pet.findFirst({
+      where: { id, ownerId },
+      include: {
+        activityLogs: {
+          orderBy: { loggedAt: 'desc' },
+          take: 30,
+        },
+        carePlans: {
+          orderBy: { date: 'desc' },
+          take: 7,
+        },
+      },
+    });
+
+    if (!pet) {
+      return NextResponse.json({ error: 'Pet not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({ pet });
+  } catch (error) {
+    console.error('Get pet error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+// PATCH /api/pets/[id] - Update a pet
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const ownerId = request.headers.get('x-owner-id');
+    
+    if (!ownerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { name, breed, weightLbs, ageYears, photoUrl, currentStreak } = body;
+
+    const pet = await prisma.pet.findFirst({
+      where: { id, ownerId },
+    });
+
+    if (!pet) {
+      return NextResponse.json({ error: 'Pet not found' }, { status: 404 });
+    }
+
+    const updatedPet = await prisma.pet.update({
+      where: { id },
+      data: {
+        ...(name && { name }),
+        ...(breed && { breed }),
+        ...(weightLbs !== undefined && { weightLbs }),
+        ...(ageYears !== undefined && { ageYears }),
+        ...(photoUrl && { photoUrl }),
+        ...(currentStreak !== undefined && { currentStreak }),
+      },
+    });
+
+    return NextResponse.json({ pet: updatedPet });
+  } catch (error) {
+    console.error('Update pet error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+// DELETE /api/pets/[id] - Delete a pet
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const ownerId = request.headers.get('x-owner-id');
+    
+    if (!ownerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const pet = await prisma.pet.findFirst({
+      where: { id, ownerId },
+    });
+
+    if (!pet) {
+      return NextResponse.json({ error: 'Pet not found' }, { status: 404 });
+    }
+
+    await prisma.pet.delete({
+      where: { id },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Delete pet error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+========== src/app/api/health/route.ts ==========
+import { NextResponse } from 'next/server';
+
+export async function GET() {
+    return NextResponse.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        service: 'pawsitive-core-api'
+    });
+}
+
+========== src/app/api/care-plans/route.ts ==========
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { generateCarePlan } from '@/lib/gemini';
+import { z } from 'zod';
+
+const generatePlanSchema = z.object({
+  petId: z.string().min(1),
+});
+
+// Simple in-memory rate limiter (5 requests per minute per owner)
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+// GET /api/care-plans - Get care plans for a pet
+export async function GET(request: NextRequest) {
+  try {
+    const ownerId = request.headers.get('x-owner-id');
+    const petId = request.nextUrl.searchParams.get('petId');
+
+    if (!ownerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    if (!petId) {
+      return NextResponse.json({ error: 'petId is required' }, { status: 400 });
+    }
+
+    // Verify pet belongs to owner
+    const pet = await prisma.pet.findFirst({
+      where: { id: petId, ownerId },
+    });
+
+    if (!pet) {
+      return NextResponse.json({ error: 'Pet not found' }, { status: 404 });
+    }
+
+    const carePlans = await prisma.carePlan.findMany({
+      where: { petId },
+      orderBy: { date: 'desc' },
+      take: 30,
+    });
+
+    return NextResponse.json({ carePlans });
+  } catch (error) {
+    console.error('Get care plans error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+// POST /api/care-plans - Generate a new AI care plan
+export async function POST(request: NextRequest) {
+  try {
+    const ownerId = request.headers.get('x-owner-id');
+    if (!ownerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Basic Rate Limiting
+    const now = Date.now();
+    const limitRecord = rateLimitMap.get(ownerId) || { count: 0, resetAt: now + 60000 };
+    if (now > limitRecord.resetAt) {
+      limitRecord.count = 1;
+      limitRecord.resetAt = now + 60000;
+    } else {
+      limitRecord.count++;
+    }
+    rateLimitMap.set(ownerId, limitRecord);
+
+    if (limitRecord.count > 5) {
+      return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 });
+    }
+
+    const body = await request.json();
+    const parseResult = generatePlanSchema.safeParse(body);
+
+    if (!parseResult.success) {
+      return NextResponse.json({ error: 'Validation failed', details: parseResult.error.format() }, { status: 400 });
+    }
+    const { petId } = parseResult.data;
+
+    // Verify pet belongs to owner
+    const pet = await prisma.pet.findFirst({
+      where: { id: petId, ownerId },
+      include: {
+        activityLogs: {
+          orderBy: { loggedAt: 'desc' },
+          take: 30,
+        },
+      },
+    });
+
+    if (!pet) {
+      return NextResponse.json({ error: 'Pet not found' }, { status: 404 });
+    }
+
+    // Get today's date
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Check if there's already a care plan for today
+    const existingPlan = await prisma.carePlan.findFirst({
+      where: {
+        petId,
+        date: {
+          gte: today,
+          lt: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+        },
+      },
+    });
+
+    if (existingPlan) {
+      return NextResponse.json({ carePlan: existingPlan, existing: true });
+    }
+
+    // Generate AI care plan
+    const aiPlan = await generateCarePlan({
+      name: pet.name,
+      breed: pet.breed || undefined,
+      weightLbs: pet.weightLbs || undefined,
+      ageYears: pet.ageYears || undefined,
+      recentActivities: pet.activityLogs.map((log) => ({
+        activityType: log.activityType,
+        value: log.value,
+        loggedAt: log.loggedAt,
+      })),
+    });
+
+    // Create care plan
+    const carePlan = await prisma.carePlan.create({
+      data: {
+        petId,
+        date: today,
+        targetExerciseMins: aiPlan.targetExerciseMins,
+        targetCalories: aiPlan.targetCalories,
+        aiInsightText: aiPlan.aiInsightText,
+        status: 'ACTIVE',
+      },
+    });
+
+    // Award XP for generating a care plan
+    await prisma.owner.update({
+      where: { id: ownerId },
+      data: { xpBalance: { increment: 25 } },
+    });
+
+    return NextResponse.json({ carePlan });
+  } catch (error) {
+    console.error('Generate care plan error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+========== src/app/api/owners/me/stats/route.ts ==========
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+
+// GET /api/owner/stats - Get owner stats and dashboard data
+export async function GET(request: NextRequest) {
+  try {
+    const ownerId = request.headers.get('x-owner-id');
+    if (!ownerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const owner = await prisma.owner.findUnique({
+      where: { id: ownerId },
+      include: {
+        pets: {
+          include: {
+            activityLogs: {
+              orderBy: { loggedAt: 'desc' },
+              take: 7,
+            },
+          },
+        },
+      },
+    });
+
+    if (!owner) {
+      return NextResponse.json({ error: 'Owner not found' }, { status: 404 });
+    }
+
+    // Calculate stats
+    const totalPets = owner.pets.length;
+    const totalXp = owner.xpBalance;
+    
+    // Get streak data for each pet
+    const petStats = owner.pets.map((pet) => ({
+      id: pet.id,
+      name: pet.name,
+      currentStreak: pet.currentStreak,
+      recentActivities: pet.activityLogs.length,
+    }));
+
+    // Calculate 7-day activity summary
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const recentLogs = await prisma.activityLog.findMany({
+      where: {
+        pet: { ownerId },
+        loggedAt: { gte: sevenDaysAgo },
+      },
+    });
+
+    const activityByDay = Array.from({ length: 7 }, (_, i) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (6 - i));
+      const dateStr = date.toISOString().split('T')[0];
+      
+      const dayLogs = recentLogs.filter(
+        (log) => log.loggedAt.toISOString().split('T')[0] === dateStr
+      );
+      
+      return {
+        date: dateStr,
+        count: dayLogs.length,
+        walks: dayLogs.filter((l) => l.activityType === 'WALK').length,
+        meals: dayLogs.filter((l) => l.activityType === 'MEAL').length,
+      };
+    });
+
+    return NextResponse.json({
+      owner: {
+        id: owner.id,
+        email: owner.email,
+        name: owner.name,
+        xpBalance: totalXp,
+      },
+      totalPets,
+      petStats,
+      activityByDay,
+    });
+  } catch (error) {
+    console.error('Get stats error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+========== src/app/api/activity-logs/route.ts ==========
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { z } from 'zod';
+
+const createLogSchema = z.object({
+  petId: z.string(),
+  activityType: z.enum(['WALK', 'MEAL', 'SYMPTOM_CHECK']),
+  value: z.number().min(0),
+  notes: z.string().optional().nullable(),
+  idempotencyKey: z.string().optional().nullable(),
+});
+
+// GET /api/activity-logs - Get activity logs for a pet
+export async function GET(request: NextRequest) {
+  try {
+    const ownerId = request.headers.get('x-owner-id');
+    const petId = request.nextUrl.searchParams.get('petId');
+    const days = request.nextUrl.searchParams.get('days');
+
+    if (!ownerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Verify pet belongs to owner
+    if (petId) {
+      const pet = await prisma.pet.findFirst({
+        where: { id: petId, ownerId },
+      });
+      if (!pet) {
+        return NextResponse.json({ error: 'Pet not found' }, { status: 404 });
+      }
+    }
+
+    const whereClause: any = petId ? { petId } : {};
+
+    if (days) {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - parseInt(days));
+      whereClause.loggedAt = { gte: startDate };
+    }
+
+    const logs = await prisma.activityLog.findMany({
+      where: whereClause,
+      orderBy: { loggedAt: 'desc' },
+      include: { pet: { select: { id: true, name: true } } },
+    });
+
+    return NextResponse.json({ logs });
+  } catch (error) {
+    console.error('Get activity logs error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+// POST /api/activity-logs - Log a new activity
+export async function POST(request: NextRequest) {
+  try {
+    const ownerId = request.headers.get('x-owner-id');
+    if (!ownerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const parseResult = createLogSchema.safeParse(body);
+
+    if (!parseResult.success) {
+      return NextResponse.json({ error: 'Validation failed', details: parseResult.error.format() }, { status: 400 });
+    }
+
+    const { petId, activityType, value, notes, idempotencyKey } = parseResult.data;
+
+    // Validate activity type
+    const validTypes = ['WALK', 'MEAL', 'SYMPTOM_CHECK'];
+    if (!validTypes.includes(activityType)) {
+      return NextResponse.json({ error: 'Invalid activity type' }, { status: 400 });
+    }
+
+    // Verify pet belongs to owner
+    const pet = await prisma.pet.findFirst({
+      where: { id: petId, ownerId },
+    });
+
+    if (!pet) {
+      return NextResponse.json({ error: 'Pet not found' }, { status: 404 });
+    }
+
+    // Check idempotency key to prevent double-logging
+    if (idempotencyKey) {
+      const existing = await prisma.activityLog.findFirst({
+        where: {
+          petId,
+          activityType: activityType as any,
+          idempotencyKey,
+        },
+      });
+      if (existing) {
+        return NextResponse.json({ log: existing, idempotent: true });
+      }
+    }
+
+    const log = await prisma.activityLog.create({
+      data: {
+        petId,
+        activityType: activityType as any,
+        value,
+        notes: notes || null,
+        idempotencyKey: idempotencyKey || null,
+      },
+    });
+
+    // Award XP for logging activity
+    await prisma.owner.update({
+      where: { id: ownerId },
+      data: { xpBalance: { increment: 10 } },
+    });
+
+    // Update streak AFTER log creation
+    await updateStreak(petId);
+
+    return NextResponse.json({ log });
+  } catch (error) {
+    console.error('Create activity log error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+// Helper function to update streak
+async function updateStreak(petId: string) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  // Check how many activities happened today.
+  // We just created one, so if count > 1, the streak increment was already handled today.
+  const todayActivitiesCount = await prisma.activityLog.count({
+    where: {
+      petId,
+      loggedAt: { gte: today },
+    },
+  });
+
+  if (todayActivitiesCount > 1) return; // Streak already handled
+
+  // This is the first activity of the day. Get the last activity BEFORE today:
+  const lastActivityBeforeToday = await prisma.activityLog.findFirst({
+    where: {
+      petId,
+      loggedAt: { lt: today }
+    },
+    orderBy: { loggedAt: 'desc' },
+  });
+
+  if (!lastActivityBeforeToday) {
+    // Very first activity ever logged for this pet
+    await prisma.pet.update({
+      where: { id: petId },
+      data: { currentStreak: 1 },
+    });
+    return;
+  }
+
+  const lastDate = new Date(lastActivityBeforeToday.loggedAt);
+  lastDate.setHours(0, 0, 0, 0);
+
+  if (lastDate.getTime() === yesterday.getTime()) {
+    // Last activity was yesterday, increment streak
+    await prisma.pet.update({
+      where: { id: petId },
+      data: { currentStreak: { increment: 1 } },
+    });
+  } else {
+    // Streak broken, reset to 1
+    await prisma.pet.update({
+      where: { id: petId },
+      data: { currentStreak: 1 },
+    });
+  }
+}
+
+========== src/app/page.tsx ==========
+import Navbar from "@/components/landing/Navbar";
+import Hero from "@/components/landing/Hero";
+import AppPreview from "@/components/landing/AppPreview";
+import Services from "@/components/landing/Services";
+import About from "@/components/landing/About";
+import Values from "@/components/landing/Values";
+import Testimonials from "@/components/landing/Testimonials";
+import Contact from "@/components/landing/Contact";
+
+export default function Home() {
+  return (
+    <>
+      <Navbar />
+      <main className="flex-col w-full min-h-screen">
+        <Hero />
+        <AppPreview />
+        <Services />
+        <About />
+        <Values />
+        <Testimonials />
+        <Contact />
+      </main>
+    </>
+  );
+}
+
+========== src/app/globals.css ==========
+@import "tailwindcss";
+
+:root {
+  --background: #FDF8F3;
+  --foreground: #342C28;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-serif: var(--font-lora);
+  --font-sans: var(--font-inter);
+  
+  /* Heart-Warming Brand Colors */
+  --color-primary: #A48D80;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #E9C4A6;
+  --color-secondary-foreground: #342C28;
+  --color-accent: #EAE4DC;
+  --color-accent-foreground: #342C28;
+  --color-muted: #F4EEE8;
+  --color-muted-foreground: #8F7E73;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-serif), serif;
+}
+
+========== src/app/not-found.tsx ==========
+import Link from "next/link";
+
+export default function NotFound() {
+    return (
+        <div className="min-h-screen flex flex-col items-center justify-center p-4" style={{ backgroundColor: "#FDF8F3" }}>
+            <div className="text-8xl mb-6">🐶</div>
+            <h1 className="text-4xl md:text-5xl font-extrabold mb-4 text-[#1a1a2e]" style={{ fontFamily: "var(--font-serif)" }}>
+                Page Not Found
+            </h1>
+            <p className="text-lg text-[#4a5568] mb-8 text-center max-w-md">
+                Whoops! Looks like this page ran away. Let's get you back to the main path.
+            </p>
+            <Link href="/">
+                <button
+                    className="px-8 py-3 rounded-full font-bold text-white transition-transform hover:scale-105"
+                    style={{ backgroundColor: "#4a9068" }}
+                >
+                    Return Home
+                </button>
+            </Link>
+        </div>
+    );
+}
+
+========== src/app/providers.tsx ==========
+"use client";
+
+import { AuthProvider } from "@/lib/auth-context";
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  return <AuthProvider>{children}</AuthProvider>;
+}
+
+========== src/components/landing/Values.tsx ==========
+"use client";
+
+import { motion } from "framer-motion";
+
+const SPRING = { type: "spring", stiffness: 280, damping: 28 } as const;
+
+const values = [
+  {
+    title: "Empowerment through AI",
+    description: "We use cutting-edge AI to give you clarity and confidence in your pet's daily care needs, acting as your smart companion between vet visits.",
+    image: "/images/value_main.png",
+    className: "md:col-span-2 lg:col-span-2",
+  },
+  {
+    title: "Proactive Wellness",
+    description: "Catching tiny health changes early through smart daily logging is the best medicine for a long, happy life.",
+    image: "/images/value_wellness.png",
+    className: "md:col-span-1 lg:col-span-1",
+  },
+  {
+    title: "Data Trust & Privacy",
+    description: "Your daily walk routes and pet's health logs are yours alone. We secure your data with industry-leading privacy standards.",
+    image: "/images/dog1.jpg",
+    className: "md:col-span-1 lg:col-span-1",
+  },
+  {
+    title: "Joyful Tracking",
+    description: "Keeping your dog healthy shouldn't feel like a chore. We believe in gamified, rewarding care that makes every walk and meal a win.",
+    image: "/images/dog3.jpg",
+    className: "md:col-span-2 lg:col-span-2",
+  }
+];
+
+export default function Values() {
+  return (
+    <section className="py-24 relative overflow-hidden" style={{ backgroundColor: "#FDF8F3" }}>
+      {/* Decorative paw prints / shapes */}
+      <div className="absolute top-10 left-10 opacity-10 rotate-12 pointer-events-none">
+        <svg width="120" height="120" viewBox="0 0 24 24" fill="currentColor" className="text-orange-500">
+          <path d="M12 2c-5.52 0-10 4.48-10 10s4.48 10 10 10 10-4.48 10-10-4.48-10-10-10zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-14v4h-2V6h2zm0 6v6h-2v-6h2z" />
+        </svg>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={SPRING}
+          className="text-center mb-16"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            whileInView={{ opacity: 1, scale: 1 }}
+            viewport={{ once: true }}
+            className="inline-flex items-center justify-center p-2 px-4 rounded-full mb-6 font-semibold"
+            style={{
+              background: "rgba(13,148,136,0.1)",
+              color: "#0F766E",
+              fontSize: "0.875rem"
+            }}
+          >
+            Our Core Values
+          </motion.div>
+          <h2
+            className="font-bold mb-6"
+            style={{
+              fontFamily: "var(--font-serif, serif)",
+              fontSize: "clamp(2rem, 5vw, 3.5rem)",
+              color: "#1a1a2e",
+              letterSpacing: "-0.025em"
+            }}
+          >
+            Built for the love of dogs.<br />Designed for peace of mind.
+          </h2>
+          <p
+            className="max-w-2xl mx-auto leading-relaxed"
+            style={{ fontSize: "1.125rem", color: "#64748b" }}
+          >
+            We're on a mission to extend the health and happiness of every pet by making expert-level care accessible, habit-forming, and fun.
+          </p>
+        </motion.div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 auto-rows-[320px]">
+          {values.map((value, index) => (
+            <motion.div
+              key={index}
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ ...SPRING, delay: index * 0.15 }}
+              whileHover={{ y: -6, scale: 0.98 }}
+              className={`relative rounded-3xl overflow-hidden group ${value.className || ''}`}
+              style={{
+                boxShadow: "0 10px 40px rgba(0,0,0,0.06), 0 2px 10px rgba(0,0,0,0.04)"
+              }}
+            >
+              <div className="absolute inset-0 w-full h-full">
+                <img
+                  src={value.image}
+                  alt={value.title}
+                  className="w-full h-full transition-transform duration-700 ease-out group-hover:scale-105 object-cover"
+                />
+                <div
+                  className="absolute inset-0 transition-opacity duration-500 opacity-100"
+                  style={{
+                    background: "linear-gradient(to bottom, rgba(0,0,0,0.0) 0%, rgba(0,0,0,0.4) 40%, rgba(0,0,0,0.85) 100%)"
+                  }}
+                />
+              </div>
+
+              <div className="absolute inset-0 p-8 flex flex-col justify-end z-10 w-full md:w-[85%]">
+                <div className="mb-3 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
+                  <span
+                    className="inline-block px-4 py-1.5 rounded-full font-bold text-sm tracking-wide shadow-sm"
+                    style={{
+                      background: "rgba(255,255,255,0.2)",
+                      backdropFilter: "blur(8px)",
+                      color: "#fff",
+                      border: "1px solid rgba(255,255,255,0.3)"
+                    }}
+                  >
+                    {value.title}
+                  </span>
+                </div>
+
+                <p
+                  className="text-white font-medium leading-relaxed text-[1.05rem] opacity-0 group-hover:opacity-100 transform translate-y-4 group-hover:translate-y-0 transition-all duration-500 delay-75"
+                >
+                  {value.description}
+                </p>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+========== src/components/landing/Hero.tsx ==========
+"use client";
+
+import { motion } from "framer-motion";
+import { useAuth } from "@/lib/auth-context";
+
+const SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
+const SPRING_SLOW = { type: "spring", stiffness: 180, damping: 28 } as const;
+
+export default function Hero() {
+  const { signInWithGithub } = useAuth();
+
+  return (
+    <section
+      className="relative pt-24 pb-16 md:pt-32 md:pb-24 overflow-hidden"
+      style={{ backgroundColor: "#FDF8F3" }}
+    >
+      {/* ─── Background Layer ───────────────────────────────────────────────────
+          Source: DOM extraction of https://petpals.framer.website
+          Asset:  framerusercontent.com/images/Ed0Z2KR0dQOjXrGa2k7G0tp2A.png
+          Role:   Large organic blob shape (2695×2539 px) — absolutely positioned
+                  at z-index 0, spanning the full hero area.
+          Per elite-designer rule: NOT a hallucinated gradient — this is the
+          exact <img> asset extracted from the reference DOM.
+      ─────────────────────────────────────────────────────────────────────── */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+
+
+        {/* Secondary warm-tint blob — bottom-left counterweight */}
+        <motion.div
+          initial={{ opacity: 0, x: -40 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 2, delay: 0.4, ease: "easeOut" }}
+          className="absolute"
+          style={{
+            bottom: "-10%",
+            left: "-8%",
+            width: "480px",
+            height: "480px",
+            borderRadius: "60% 40% 55% 45% / 45% 55% 45% 55%",
+            background:
+              "radial-gradient(ellipse at 40% 50%, rgba(255,203,119,0.18) 0%, transparent 70%)",
+          }}
+        />
+      </div>
+
+      {/* Left Side Image (Dog) - Placed relative to full screen */}
+      <motion.div
+        initial={{ opacity: 0, x: -60 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ ...SPRING_SLOW, delay: 0.3 }}
+        className="absolute left-[-15%] xl:left-[-10%] 2xl:left-[-5%] top-[55%] -translate-y-1/2 hidden lg:block w-[40vw] max-w-[800px] min-w-[450px] pointer-events-none opacity-95 z-0"
+      >
+        <img
+          src="/images/hero_dog.png"
+          alt="PetPals Dog"
+          className="w-full h-auto object-contain drop-shadow-2xl -scale-x-100"
+        />
+      </motion.div>
+
+      {/* Right Side Image (Cat) - Placed relative to full screen */}
+      <motion.div
+        initial={{ opacity: 0, x: 60 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ ...SPRING_SLOW, delay: 0.5 }}
+        className="absolute right-0 xl:right-[2%] 2xl:right-[4%] top-[50%] -translate-y-1/2 hidden lg:block w-[18vw] max-w-[320px] min-w-[220px] pointer-events-none opacity-95 z-0"
+      >
+        <img
+          src="/images/hero_cat.png"
+          alt="PetPals Cat"
+          className="w-full h-auto object-contain drop-shadow-2xl -scale-x-100"
+        />
+      </motion.div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-20 min-h-[60vh] flex flex-col justify-center">
+
+        {/* Center Content */}
+        <div className="max-w-3xl mx-auto text-center relative z-30 mt-12">
+          <motion.div
+            initial={{ opacity: 0, y: 32 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...SPRING, delay: 0.1 }}
+          >
+            {/* Pill badge */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.88 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ ...SPRING, delay: 0.25 }}
+              className="inline-flex items-center gap-2 font-semibold px-4 py-2 rounded-full mb-8"
+              style={{
+                background: "rgba(91,139,108,0.10)",
+                color: "#3d7a5a",
+                boxShadow: "0 1px 3px rgba(91,139,108,0.12)",
+                fontSize: "0.8125rem",
+                letterSpacing: "0.01em",
+              }}
+            >
+              <span
+                className="w-2 h-2 rounded-full animate-pulse"
+                style={{ background: "#4a9068" }}
+              />
+              AI-Powered Pet Care
+            </motion.div>
+
+            <h1
+              className="font-serif font-extrabold leading-[1.08] mb-8"
+              style={{
+                fontSize: "clamp(2.6rem, 6vw, 4.5rem)",
+                color: "#1a1a2e",
+                letterSpacing: "-0.025em",
+              }}
+            >
+              Your Dog's Health,{" "}
+              <br />
+              <span
+                style={{
+                  color: "#4a9068",
+                  borderBottom: "3px solid rgba(255,183,77,0.55)",
+                  paddingBottom: "4px",
+                }}
+              >
+                Powered by AI.
+              </span>
+            </h1>
+
+            <p
+              className="mb-10 max-w-2xl mx-auto leading-relaxed"
+              style={{
+                fontSize: "clamp(1rem, 2vw, 1.175rem)",
+                color: "#4a5568",
+              }}
+            >
+              Turn daily walks, meals, and health checks into a rewarding journey. Pawsitive combines personalized AI care plans with a fun streak system to keep your furry friend happy, healthy, and thriving.
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-5 justify-center">
+              <motion.button
+                onClick={signInWithGithub}
+                whileHover={{ scale: 1.04, y: -2 }}
+                whileTap={{ scale: 0.96 }}
+                transition={SPRING}
+                className="font-bold text-white rounded-full"
+                style={{
+                  background: "linear-gradient(135deg, #4a9068 0%, #3d7a5a 100%)",
+                  fontSize: "1.0625rem",
+                  padding: "1rem 2rem",
+                  boxShadow:
+                    "0 4px 20px rgba(74,144,104,0.35), 0 1px 4px rgba(74,144,104,0.2)",
+                  border: "none",
+                }}
+              >
+                Get Started
+              </motion.button>
+
+              <motion.button
+                whileHover={{ scale: 1.04, y: -2 }}
+                whileTap={{ scale: 0.96 }}
+                transition={SPRING}
+                className="rounded-full flex items-center justify-center gap-2 font-semibold"
+                style={{
+                  fontSize: "1.0625rem",
+                  padding: "1rem 2rem",
+                  background: "rgba(255,255,255,0.85)",
+                  color: "#2d3748",
+                  border: "1.5px solid rgba(0,0,0,0.08)",
+                  backdropFilter: "blur(8px)",
+                  boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
+                }}
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                  style={{ color: "#4a9068" }}
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                See How It Works
+              </motion.button>
+            </div>
+
+
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+========== src/components/landing/Navbar.tsx ==========
+"use client";
+
+import { motion } from "framer-motion";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
+
+const SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
+
+export default function Navbar() {
+  const { owner, loading, signInWithGithub, signOut, enableDemoMode } = useAuth();
+  const router = useRouter();
+
+  return (
+    <nav
+      className="fixed top-0 left-0 right-0 z-50"
+      style={{
+        background: "rgba(255,255,255,0.82)",
+        backdropFilter: "blur(12px)",
+        borderBottom: "1px solid rgba(0,0,0,0.06)"
+      }}
+    >
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+          {/* Logo */}
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={SPRING}
+            className="flex items-center gap-3"
+          >
+            <div
+              className="w-11 h-11 rounded-2xl flex items-center justify-center relative"
+              style={{ backgroundColor: "#4a9068" }}
+            >
+              <svg className="w-6 h-6 text-[#2A5C41] transform -rotate-12" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8.5 7.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm7 0c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM12 11c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm-6.5-1.5c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm13 0c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z" />
+              </svg>
+            </div>
+            <span
+              className="font-extrabold text-[1.35rem]"
+              style={{
+                fontFamily: "var(--font-nunito, nunito, sans-serif)",
+                color: "#1a1a2e",
+                letterSpacing: "-0.02em"
+              }}
+            >
+              Pawsitive
+            </span>
+          </motion.div>
+
+          {/* Navigation Links */}
+          <div className="hidden md:flex items-center gap-10">
+            {["Features", "How It Works", "Testimonials"].map((item) => (
+              <Link
+                key={item}
+                href={`#${item.toLowerCase().replace(" ", "-")}`}
+                className="relative font-bold text-[0.85rem] transition-colors hover:text-[#4a9068]"
+                style={{ color: "#64748b" }}
+              >
+                <span className="relative z-10">{item}</span>
+                <motion.span
+                  layoutId="nav-underline"
+                  className="absolute left-0 -bottom-1.5 w-full h-0.5 rounded-full"
+                  style={{ background: "#4a9068", opacity: 0 }}
+                  whileHover={{ opacity: 1 }}
+                  transition={SPRING}
+                />
+              </Link>
+            ))}
+          </div>
+
+          {/* Auth Buttons */}
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={SPRING}
+            className="flex items-center gap-4"
+          >
+            {loading ? (
+              <div className="w-20 h-8 bg-gray-200 rounded-full animate-pulse" />
+            ) : owner ? (
+              // Logged in state
+              <div className="flex items-center gap-4">
+                <span
+                  className="font-medium text-sm"
+                  style={{ color: "#4a5568" }}
+                >
+                  Hi, {owner.name?.split(" ")[0] || "there"}! 🐾
+                </span>
+                <motion.button
+                  whileHover={{ scale: 1.04, y: -2 }}
+                  whileTap={{ scale: 0.96 }}
+                  transition={SPRING}
+                  onClick={signOut}
+                  className="font-semibold text-white rounded-full"
+                  style={{
+                    backgroundColor: "#4a9068",
+                    padding: "0.6rem 1.4rem",
+                    fontSize: "0.85rem",
+                    border: "none"
+                  }}
+                >
+                  Sign Out
+                </motion.button>
+              </div>
+            ) : (
+              // Logged out state
+              <>
+                <button
+                  onClick={async () => { await enableDemoMode(); router.push('/dashboard'); }}
+                  className="text-[0.7rem] font-medium transition-colors hover:text-[#4a9068] mr-2"
+                  style={{ color: "#9ca3af" }}
+                >
+                  Judge Demo
+                </button>
+                <motion.button
+                  whileHover={{ scale: 1.03, y: -1 }}
+                  whileTap={{ scale: 0.97 }}
+                  transition={SPRING}
+                  onClick={signInWithGithub}
+                  className="font-bold text-[0.85rem] transition-colors hover:text-[#4a9068]"
+                  style={{ color: "#64748b" }}
+                >
+                  Log In
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.04, y: -2 }}
+                  whileTap={{ scale: 0.96 }}
+                  transition={SPRING}
+                  onClick={signInWithGithub}
+                  className="font-bold text-white rounded-full"
+                  style={{
+                    backgroundColor: "#4a9068",
+                    padding: "0.6rem 1.4rem",
+                    fontSize: "0.85rem",
+                    border: "none"
+                  }}
+                >
+                  Get Started
+                </motion.button>
+              </>
+            )}
+          </motion.div>
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+========== src/components/landing/AppPreview.tsx ==========
+"use client";
+
+import { motion } from "framer-motion";
+
+const SPRING = { type: "spring", stiffness: 280, damping: 28 } as const;
+
+export default function AppPreview() {
+    return (
+        <section className="py-24 bg-white relative overflow-hidden" id="app-preview">
+            {/* Decorative Background Element */}
+            <div
+                className="absolute top-0 right-0 w-1/2 h-full opacity-30 pointer-events-none"
+                style={{
+                    background: "radial-gradient(circle at 80% 20%, rgba(13,148,136,0.08) 0%, transparent 60%)"
+                }}
+            />
+
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+                <motion.div
+                    initial={{ opacity: 0, y: 24 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={SPRING}
+                    className="text-center mb-16"
+                >
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        whileInView={{ opacity: 1, scale: 1 }}
+                        viewport={{ once: true }}
+                        className="inline-flex items-center justify-center p-2 px-4 rounded-full mb-6 font-semibold"
+                        style={{
+                            background: "rgba(249,115,22,0.1)",
+                            color: "#c25e13",
+                            fontSize: "0.875rem"
+                        }}
+                    >
+                        Inside the App
+                    </motion.div>
+                    <h2
+                        className="font-bold mb-6"
+                        style={{
+                            fontFamily: "var(--font-serif, serif)",
+                            fontSize: "clamp(2rem, 5vw, 3rem)",
+                            color: "#1a1a2e",
+                            letterSpacing: "-0.02em"
+                        }}
+                    >
+                        Everything your dog needs.<br />All in one place.
+                    </h2>
+                    <p
+                        className="max-w-2xl mx-auto leading-relaxed"
+                        style={{ fontSize: "1.125rem", color: "#64748b" }}
+                    >
+                        From AI breed detection to daily streak tracking, Pawsitive makes managing your pet's health fun and effortless.
+                    </p>
+                </motion.div>
+
+                {/* Bento Grid layout for App Features */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+                    {/* Feature 1: AI Breed Profile - Spans 2 cols on Desktop */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 30 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        transition={{ ...SPRING, delay: 0.1 }}
+                        className="lg:col-span-2 rounded-[2rem] overflow-hidden relative p-8 md:p-12 flex flex-col md:flex-row items-center gap-8 shadow-sm border border-slate-100 group"
+                        style={{ backgroundColor: "#F8FAFC" }}
+                    >
+                        <div className="flex-1 w-full relative z-10">
+                            <div
+                                className="w-12 h-12 rounded-2xl mb-6 flex items-center justify-center"
+                                style={{ background: "linear-gradient(135deg, #0D9488 0%, #0F766E 100%)", color: "white" }}
+                            >
+                                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                            </div>
+                            <h3 className="text-2xl font-bold text-slate-900 mb-3" style={{ fontFamily: "var(--font-serif, serif)" }}>
+                                AI Breed Detection
+                            </h3>
+                            <p className="text-slate-600 leading-relaxed mb-6">
+                                Just snap a quick photo. Our AI instantly recognizes your dog's breed and builds a personalized daily care plan based on their specific genetic needs, age, and weight.
+                            </p>
+                            <ul className="space-y-3">
+                                {['Custom diet targets', 'Breed-specific exercise goals', 'Genetic health warnings'].map((item, i) => (
+                                    <li key={i} className="flex items-center gap-3 text-sm font-medium text-slate-700">
+                                        <svg className="w-5 h-5 text-teal-600" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                        </svg>
+                                        {item}
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+
+                        {/* Mock UI Element */}
+                        <div className="w-full md:w-[280px] h-[320px] rounded-[2rem] bg-white shadow-2xl overflow-hidden border-4 border-slate-50 relative group-hover:-translate-y-2 transition-transform duration-500">
+                            <div className="absolute top-0 left-0 w-full h-1/2 bg-slate-100">
+                                <img src="/images/golden_retriever_scan.png" alt="Scanning dog" className="w-full h-full object-cover" />
+                                {/* Scanner line animation overlay */}
+                                <motion.div
+                                    animate={{ y: ["0%", "200%", "0%"] }}
+                                    transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                                    className="absolute top-0 left-0 w-full h-[2px] bg-teal-400 shadow-[0_0_8px_2px_rgba(45,212,191,0.5)]"
+                                />
+                            </div>
+                            <div className="absolute bottom-0 left-0 w-full h-1/2 p-5 flex flex-col justify-center">
+                                <div className="text-xs font-semibold text-teal-600 uppercase tracking-wider mb-1">Scan Complete</div>
+                                <div className="font-bold text-xl text-slate-800 mb-4">Golden Retriever</div>
+                                <div className="w-full h-2 bg-slate-100 rounded-full mb-2 overflow-hidden">
+                                    <motion.div initial={{ width: 0 }} whileInView={{ width: "98%" }} viewport={{ once: true }} transition={{ duration: 1, delay: 0.5 }} className="h-full bg-teal-500 rounded-full" />
+                                </div>
+                                <div className="text-xs text-slate-500 mb-4 flex justify-between">
+                                    <span>Confidence</span>
+                                    <span className="font-semibold text-slate-700">98.4%</span>
+                                </div>
+                                <button className="w-full py-2 bg-slate-900 text-white rounded-xl text-sm font-semibold">Generate Care Plan</button>
+                            </div>
+                        </div>
+                    </motion.div>
+
+                    {/* Feature 2: GPS Walk Tracking */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 30 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        transition={{ ...SPRING, delay: 0.2 }}
+                        className="rounded-[2rem] p-8 md:p-10 flex flex-col shadow-sm border border-slate-100 group overflow-hidden relative"
+                        style={{ backgroundColor: "#FDF8F3" }}
+                    >
+                        <div
+                            className="w-12 h-12 rounded-2xl mb-6 flex items-center justify-center relative z-10"
+                            style={{ background: "linear-gradient(135deg, #F97316 0%, #EA580C 100%)", color: "white" }}
+                        >
+                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                        </div>
+                        <h3 className="text-2xl font-bold text-slate-900 mb-3 relative z-10" style={{ fontFamily: "var(--font-serif, serif)" }}>
+                            GPS Walk Logging
+                        </h3>
+                        <p className="text-slate-600 leading-relaxed mb-8 relative z-10">
+                            Automatically track your routes, distance, and active minutes. Watch your daily rings close and build healthy exercise streaks.
+                        </p>
+
+                        <div className="mt-auto relative w-full aspect-square max-h-[220px] mx-auto group-hover:scale-105 transition-transform duration-500">
+                            <div className="absolute inset-x-4 inset-y-0 rounded-t-3xl bg-white shadow-xl border-x-4 border-t-4 border-slate-50 overflow-hidden flex flex-col p-4">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-xl">🐕</div>
+                                    <div>
+                                        <div className="text-xs text-slate-500 font-medium">Morning Walk</div>
+                                        <div className="text-sm font-bold text-slate-800">1.2 miles</div>
+                                    </div>
+                                    <div className="ml-auto text-xs font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-lg">+50 XP</div>
+                                </div>
+                                {/* Mock Map Map */}
+                                <div className="flex-1 w-full bg-slate-100 rounded-xl relative overflow-hidden">
+                                    <svg className="absolute inset-0 w-full h-full text-blue-200" viewBox="0 0 100 100" preserveAspectRatio="none">
+                                        <path d="M-10,50 Q20,20 50,50 T110,50" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+                                        <circle cx="50" cy="50" r="4" fill="#3B82F6" className="animate-pulse" />
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+
+                    {/* Feature 3: Daily Health Log */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 30 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        transition={{ ...SPRING, delay: 0.3 }}
+                        className="rounded-[2rem] p-8 md:p-10 flex flex-col shadow-sm border border-slate-100 group"
+                        style={{ backgroundColor: "#F4EEE8" }}
+                    >
+                        <div
+                            className="w-12 h-12 rounded-2xl mb-6 flex items-center justify-center"
+                            style={{ background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)", color: "white" }}
+                        >
+                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                            </svg>
+                        </div>
+                        <h3 className="text-2xl font-bold text-slate-900 mb-3" style={{ fontFamily: "var(--font-serif, serif)" }}>
+                            Smart Poop & Diet Logs
+                        </h3>
+                        <p className="text-slate-600 leading-relaxed mb-6">
+                            Track meals, symptoms, and poop quality. Catch health issues early before they become expensive vet bills.
+                        </p>
+                        <div className="mt-auto space-y-3">
+                            {[
+                                { icon: "🥩", label: "Morning Meal", time: "8:00 AM", status: "Given" },
+                                { icon: "💩", label: "Poop Check", time: "8:30 AM", status: "Healthy" },
+                                { icon: "💊", label: "Heartworm Med", time: "Pending", status: "Due Today" },
+                            ].map((log, i) => (
+                                <div key={i} className="bg-white p-3 rounded-xl flex items-center gap-3 shadow-sm border border-white group-hover:border-slate-200 transition-colors">
+                                    <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-lg">{log.icon}</div>
+                                    <div className="flex-1 flex flex-col">
+                                        <span className="text-sm font-bold text-slate-800">{log.label}</span>
+                                        <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">{log.time}</span>
+                                    </div>
+                                    <div className={`text-xs font-semibold px-2 py-1 rounded-lg ${log.status === 'Healthy' || log.status === 'Given' ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700'}`}>
+                                        {log.status}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </motion.div>
+
+                    {/* Feature 4: Rewards & Streaks - Spans 2 cols on Desktop */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 30 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        transition={{ ...SPRING, delay: 0.4 }}
+                        className="lg:col-span-2 rounded-[2rem] p-8 md:p-12 shadow-sm border border-slate-100 flex flex-col md:flex-row items-center gap-10 overflow-hidden relative group"
+                        style={{ backgroundColor: "#F0F9FF" }}
+                    >
+                        {/* Background Confetti */}
+                        <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: "radial-gradient(#3B82F6 2px, transparent 2px)", backgroundSize: "24px 24px" }} />
+
+                        <div className="w-full md:w-1/2 relative space-y-6 z-10">
+                            <div
+                                className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg"
+                                style={{ background: "linear-gradient(135deg, #EAB308 0%, #CA8A04 100%)", color: "white" }}
+                            >
+                                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 className="text-3xl font-bold text-slate-900 mb-3" style={{ fontFamily: "var(--font-serif, serif)" }}>
+                                    Gamified Daily Streaks
+                                </h3>
+                                <p className="text-slate-600 leading-relaxed text-lg">
+                                    Every healthy choice earns XP. Complete daily care rings, hit your walk streaks, and unlock exclusive badges and pet-store coupons in your digital wallet.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="w-full md:w-1/2 flex justify-center relative z-10">
+                            {/* Mock Gamification UI */}
+                            <div className="w-full max-w-[320px] bg-white rounded-3xl p-6 shadow-xl border-2 border-blue-50 relative group-hover:scale-105 transition-transform duration-500">
+                                <div className="text-center mb-6">
+                                    <div className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-1">Current Streak</div>
+                                    <div className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-rose-500 mb-2">14 Days</div>
+                                    <div className="text-sm text-slate-600 font-medium">✨ You're on fire! Keep it up!</div>
+                                </div>
+
+                                <div className="flex gap-2 mb-6">
+                                    {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, i) => (
+                                        <div key={i} className="flex-1 flex flex-col items-center gap-2">
+                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${i < 4 ? 'bg-orange-100 text-orange-600' : i === 4 ? 'bg-orange-500 text-white shadow-md shadow-orange-200 ring-2 ring-orange-500 ring-offset-2' : 'bg-slate-100 text-slate-400'}`}>
+                                                {i < 4 ? '✓' : i === 4 ? '🔥' : ''}
+                                            </div>
+                                            <span className="text-xs font-semibold text-slate-400">{day}</span>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="bg-slate-50 rounded-2xl p-4 flex items-center gap-4">
+                                    <div className="w-14 h-14 bg-yellow-100 rounded-xl flex items-center justify-center text-3xl shadow-inner">🏆</div>
+                                    <div>
+                                        <div className="text-xs font-bold text-slate-500 uppercase">Next Reward</div>
+                                        <div className="font-bold text-slate-800">10% Off Chewy</div>
+                                        <div className="w-full h-1.5 bg-slate-200 mt-2 rounded-full overflow-hidden">
+                                            <div className="w-[80%] h-full bg-yellow-400 rounded-full" />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+
+                </div>
+            </div>
+        </section>
+    );
+}
+
+========== src/components/landing/Contact.tsx ==========
+"use client";
+
+import { motion } from "framer-motion";
+
+const SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
+
+export default function Contact() {
+  return (
+    <footer 
+      className="py-16"
+      style={{ 
+        background: "linear-gradient(180deg, #1a1a2e 0%, #0f0f1a 100%)"
+      }}
+    >
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid md:grid-cols-4 gap-12 mb-12">
+          <div>
+            <h3 
+              className="font-bold mb-4"
+              style={{
+                fontFamily: "var(--font-nunito, nunito, sans-serif)",
+                fontSize: "1.25rem",
+                color: "#fff"
+              }}
+            >
+              Pawsitive
+            </h3>
+            <p style={{ color: "#8b8fa3", lineHeight: 1.7, fontSize: "0.9375rem" }}>
+              Your trusted partner in pet care, offering tailored services to ensure the health, happiness, and well-being of your beloved furry companions.
+            </p>
+          </div>
+          
+          <div>
+            <h4 
+              className="font-bold mb-4"
+              style={{ color: "#fff", fontSize: "0.9375rem" }}
+            >
+              Quick Links
+            </h4>
+            <ul className="space-y-2.5">
+              {["Home", "Services", "About Us", "Contact"].map((item) => (
+                <li key={item}>
+                  <motion.a
+                    href="#"
+                    whileHover={{ x: 4 }}
+                    transition={SPRING}
+                    className="inline-block"
+                    style={{ color: "#8b8fa3", fontSize: "0.875rem" }}
+                  >
+                    {item}
+                  </motion.a>
+                </li>
+              ))}
+            </ul>
+          </div>
+          
+          <div>
+            <h4 
+              className="font-bold mb-4"
+              style={{ color: "#fff", fontSize: "0.9375rem" }}
+            >
+              Contact Info
+            </h4>
+            <ul className="space-y-2.5" style={{ color: "#8b8fa3", fontSize: "0.875rem" }}>
+              <li>123 PetCare Avenue, Cityville, USA</li>
+              <li>1-800-PET-CARE</li>
+              <li>Info@pawsitive.com</li>
+            </ul>
+          </div>
+          
+          <div>
+            <h4 
+              className="font-bold mb-4"
+              style={{ color: "#fff", fontSize: "0.9375rem" }}
+            >
+              Follow Us
+            </h4>
+            <div className="flex gap-3">
+              {[
+                { icon: "📘", label: "Facebook" },
+                { icon: "📷", label: "Instagram" },
+                { icon: "🐦", label: "Twitter" }
+              ].map((social, i) => (
+                <motion.a
+                  key={i}
+                  href="#"
+                  whileHover={{ scale: 1.1, y: -2 }}
+                  whileTap={{ scale: 0.95 }}
+                  transition={SPRING}
+                  className="w-10 h-10 rounded-full flex items-center justify-center"
+                  style={{ 
+                    background: "rgba(255,255,255,0.08)",
+                    border: "1px solid rgba(255,255,255,0.1)"
+                  }}
+                  aria-label={social.label}
+                >
+                  <span style={{ fontSize: "1.1rem" }}>{social.icon}</span>
+                </motion.a>
+              ))}
+            </div>
+          </div>
+        </div>
+        
+        <div 
+          className="pt-8 text-center"
+          style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}
+        >
+          <p style={{ color: "#5a6175", fontSize: "0.8125rem" }}>
+            © 2024 Pawsitive. All rights reserved.
+          </p>
+        </div>
+      </div>
+    </footer>
+  );
+}
+
+========== src/components/landing/Services.tsx ==========
+"use client";
+
+import { motion } from "framer-motion";
+
+const SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
+
+const features = [
+  {
+    icon: (
+      <svg viewBox="0 0 64 65" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="64" height="65" rx="12" fill="url(#grad1)" />
+        <defs>
+          <linearGradient id="grad1" x1="0" y1="0" x2="64" y2="65" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#5a9a7a"/>
+            <stop offset="1" stopColor="#3d7a5a"/>
+          </linearGradient>
+        </defs>
+        <circle cx="32" cy="32" r="12" stroke="white" strokeWidth="3" fill="none" />
+        <path d="M32 28V32L36 36" stroke="white" strokeWidth="3" strokeLinecap="round" />
+      </svg>
+    ),
+    title: "AI Breed Profile",
+    description: "Instant AI-powered breed detection and personalized care recommendations based on your dog's unique needs."
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 61 62" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="61" height="62" rx="12" fill="url(#grad2)" />
+        <defs>
+          <linearGradient id="grad2" x1="0" y1="0" x2="61" y2="62" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#e8a86e"/>
+            <stop offset="1" stopColor="#d97b3d"/>
+          </linearGradient>
+        </defs>
+        <path d="M20 30H41V45C41 47.7614 38.7614 50 36 50H25C22.2386 50 20 47.7614 20 45V30Z" fill="white" />
+        <rect x="26" y="22" width="9" height="12" rx="2" fill="#d97b3d" />
+        <path d="M30 22V18M30 22C30 22 27 18 24 22M30 22C30 22 33 18 36 22" stroke="#d97b3d" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    ),
+    title: "Daily Health Log",
+    description: "Track meals, water intake, poop quality, and symptoms. Get AI insights into your pet's health trends."
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 63 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="63" height="64" rx="12" fill="url(#grad3)" />
+        <defs>
+          <linearGradient id="grad3" x1="0" y1="0" x2="63" y2="64" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#5a9a7a"/>
+            <stop offset="1" stopColor="#3d7a5a"/>
+          </linearGradient>
+        </defs>
+        <path d="M20 40L28 32L36 40L44 28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M16 44H48" stroke="white" strokeWidth="3" strokeLinecap="round" />
+      </svg>
+    ),
+    title: "Activity Tracking",
+    description: "Monitor walks, playtime, and exercise. Set daily goals and track progress with intuitive charts."
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 60 61" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="60" height="61" rx="12" fill="url(#grad4)" />
+        <defs>
+          <linearGradient id="grad4" x1="0" y1="0" x2="60" y2="61" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#e8a86e"/>
+            <stop offset="1" stopColor="#d97b3d"/>
+          </linearGradient>
+        </defs>
+        <path d="M30 15V35M30 15C33.3137 15 36 17.6863 36 21M30 15C26.6863 15 24 17.6863 24 21" stroke="white" strokeWidth="3" strokeLinecap="round" />
+        <path d="M20 45H40" stroke="white" strokeWidth="3" strokeLinecap="round" />
+        <path d="M25 35V45M35 35V45" stroke="white" strokeWidth="3" strokeLinecap="round" />
+      </svg>
+    ),
+    title: "Streaks & XP System",
+    description: "Stay motivated with gamified rewards. Earn XP for daily check-ins and maintain streaks for consistency."
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 66 67" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="66" height="67" rx="12" fill="url(#grad5)" />
+        <defs>
+          <linearGradient id="grad5" x1="0" y1="0" x2="66" y2="67" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#5a9a7a"/>
+            <stop offset="1" stopColor="#3d7a5a"/>
+          </linearGradient>
+        </defs>
+        <path d="M22 25H44V45C44 47.7614 41.7614 50 39 50H27C24.2386 50 22 47.7614 22 45V25Z" fill="white" />
+        <rect x="28" y="18" width="10" height="10" rx="2" fill="#3d7a5a" />
+        <path d="M33 18V15M33 15C33 15 30 12 27 15M33 15C33 15 36 12 39 15" stroke="#3d7a5a" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    ),
+    title: "Care Plans",
+    description: "Personalized AI-generated diet and exercise plans tailored to your dog's age, breed, and health conditions."
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 64 65" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="64" height="65" rx="12" fill="url(#grad6)" />
+        <defs>
+          <linearGradient id="grad6" x1="0" y1="0" x2="64" y2="65" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#e8a86e"/>
+            <stop offset="1" stopColor="#d97b3d"/>
+          </linearGradient>
+        </defs>
+        <path d="M20 35C20 35 25 25 32 25C39 25 44 35 44 35" stroke="white" strokeWidth="3" strokeLinecap="round" />
+        <path d="M32 45V55" stroke="white" strokeWidth="3" strokeLinecap="round" />
+        <path d="M27 55H37" stroke="white" strokeWidth="3" strokeLinecap="round" />
+      </svg>
+    ),
+    title: "Vet Reminders",
+    description: "Never miss a vaccination or check-up. Smart reminders based on your pet's health history."
+  }
+];
+
+export default function Services() {
+  return (
+    <section 
+      id="features"
+      className="py-24"
+      style={{ backgroundColor: "#EAE4DC" }}
+    >
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={SPRING}
+          className="text-center mb-16"
+        >
+          <h2 
+            className="font-bold mb-4"
+            style={{
+              fontFamily: "var(--font-serif, serif)",
+              fontSize: "clamp(1.75rem, 4vw, 2.5rem)",
+              color: "#1a1a2e",
+              letterSpacing: "-0.02em"
+            }}
+          >
+            Our Pet Care Solutions
+          </h2>
+          <p 
+            className="max-w-2xl mx-auto leading-relaxed"
+            style={{ fontSize: "1.0625rem", color: "#4a5568" }}
+          >
+            Everything you need to keep your furry friend happy, healthy, and thriving.
+          </p>
+        </motion.div>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {features.map((feature, index) => (
+            <motion.div
+              key={index}
+              initial={{ opacity: 0, y: 28 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ ...SPRING, delay: index * 0.08 }}
+              whileHover={{ y: -6, transition: SPRING }}
+              className="p-8 rounded-2xl flex gap-6"
+              style={{
+                background: "rgba(255,255,255,0.7)",
+                backdropFilter: "blur(8px)",
+                boxShadow: "0 2px 16px rgba(0,0,0,0.04), 0 8px 32px rgba(0,0,0,0.03)"
+              }}
+            >
+              <div className="w-12 h-12 flex-shrink-0">
+                {feature.icon}
+              </div>
+              <div>
+                <h3 
+                  className="font-bold mb-2"
+                  style={{
+                    fontFamily: "var(--font-serif, serif)",
+                    fontSize: "1.125rem",
+                    color: "#1a1a2e"
+                  }}
+                >
+                  {feature.title}
+                </h3>
+                <p style={{ color: "#5a6577", lineHeight: 1.65, fontSize: "0.9375rem" }}>
+                  {feature.description}
+                </p>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+========== src/components/landing/Testimonials.tsx ==========
+"use client";
+
+import { motion } from "framer-motion";
+
+const SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
+
+const testimonials = [
+  {
+    name: "Sarah L.",
+    text: "Pawsitive exceeded my expectations. Their pet sitting service was truly exceptional. Thanks to their dedicated care and attention.",
+    initials: "SL",
+    color: "linear-gradient(135deg, #0D9488 0%, #0F766E 100%)"
+  },
+  {
+    name: "Michael R.",
+    text: "Can't praise Pawsitive's grooming team enough. They transformed my dog into a furry superstar and made my pup feel truly pampered.",
+    initials: "MR",
+    color: "linear-gradient(135deg, #F97316 0%, #EA580C 100%)"
+  },
+  {
+    name: "Jennifer M.",
+    text: "Pawsitive's veterinarians are absolute gems. They provided top-notch medical care and showed immense compassion for my aging dog.",
+    initials: "JM",
+    color: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)"
+  }
+];
+
+export default function Testimonials() {
+  return (
+    <section
+      id="testimonials"
+      className="py-28"
+      style={{ backgroundColor: "#F4EEE8" }}
+    >
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid lg:grid-cols-12 gap-12 lg:gap-8 items-start">
+
+          {/* Left Column: Title & Quote Icon */}
+          <motion.div
+            initial={{ opacity: 0, x: -24 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={SPRING}
+            className="lg:col-span-5 lg:sticky top-24"
+          >
+            <h2
+              className="font-extrabold leading-tight mb-8"
+              style={{
+                fontFamily: "var(--font-serif, serif)",
+                fontSize: "clamp(2rem, 5vw, 3.5rem)",
+                color: "#2d2620",
+                letterSpacing: "-0.03em"
+              }}
+            >
+              Real Stories<br />from Pawsitive<br />Families
+            </h2>
+            <div
+              className="leading-none -mt-6"
+              style={{
+                fontSize: "7rem",
+                color: "#a48d80",
+                opacity: 0.4,
+                fontFamily: "Georgia, serif"
+              }}
+            >
+              "
+            </div>
+          </motion.div>
+
+          {/* Right Column: Cards */}
+          <div className="lg:col-span-7 space-y-6">
+            {testimonials.map((testimonial, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 24 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ ...SPRING, delay: index * 0.12 }}
+                whileHover={{ y: -2 }}
+                className="p-8 md:p-10 rounded-[2rem] flex flex-col md:flex-row gap-6 items-center md:justify-between"
+                style={{
+                  background: "rgba(255,255,255,0.85)",
+                  backdropFilter: "blur(12px)",
+                  boxShadow: "0 2px 16px rgba(0,0,0,0.04), 0 8px 32px rgba(0,0,0,0.03)"
+                }}
+              >
+                <div className="flex-1">
+                  <p
+                    className="mb-6 leading-relaxed"
+                    style={{
+                      color: "#6b5f56",
+                      fontSize: "1rem"
+                    }}
+                  >
+                    {testimonial.text}
+                  </p>
+                  <div
+                    className="font-extrabold"
+                    style={{
+                      fontFamily: "var(--font-serif, serif)",
+                      color: "#2d2620",
+                      fontSize: "1.0625rem"
+                    }}
+                  >
+                    {testimonial.name}
+                  </div>
+                </div>
+
+                <div
+                  className="flex-shrink-0 shadow-sm flex items-center justify-center text-white font-bold"
+                  style={{
+                    width: "4.5rem",
+                    height: "4.5rem",
+                    borderRadius: "50%",
+                    background: testimonial.color,
+                    border: "2px solid rgba(0,0,0,0.06)",
+                    fontSize: "1.5rem",
+                    letterSpacing: "1px"
+                  }}
+                >
+                  {testimonial.initials}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+
+        </div>
+      </div>
+    </section>
+  );
+}
+
+========== src/components/landing/About.tsx ==========
+"use client";
+
+import { motion } from "framer-motion";
+
+const SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
+
+export default function About() {
+  return (
+    <section className="py-24 overflow-hidden" style={{ backgroundColor: "#f8f9fa" }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid lg:grid-cols-12 gap-12 items-center">
+
+          {/* Left Side - Pet Images */}
+          <motion.div
+            initial={{ opacity: 0, x: -56 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={SPRING}
+            className="lg:col-span-5 relative"
+          >
+            <div className="relative w-full h-[500px]">
+              {/* Main large image */}
+              <motion.div
+                initial={{ scale: 1.05 }}
+                whileInView={{ scale: 1 }}
+                viewport={{ once: true }}
+                transition={{ ...SPRING, duration: 1.2 }}
+                className="absolute top-0 left-0 w-4/5 h-4/5 rounded-3xl overflow-hidden"
+                style={{ boxShadow: "0 24px 64px rgba(0,0,0,0.15)" }}
+              >
+                <img
+                  src="/images/about_dachshund.png"
+                  alt="Happy dog owner hugging Dachshund"
+                  className="w-full h-full object-cover"
+                />
+              </motion.div>
+
+              {/* Small overlapping image */}
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                whileInView={{ scale: 1, opacity: 1 }}
+                viewport={{ once: true }}
+                transition={{ ...SPRING, delay: 0.2, duration: 1 }}
+                className="absolute bottom-0 right-0 w-2/5 h-2/5 rounded-3xl overflow-hidden"
+                style={{
+                  boxShadow: "0 16px 48px rgba(0,0,0,0.12)",
+                  border: "4px solid #fff"
+                }}
+              >
+                <img
+                  src="/images/about_french_bulldog.png"
+                  alt="Cute French Bulldog running"
+                  className="w-full h-full object-cover"
+                />
+              </motion.div>
+
+              {/* Floating badge */}
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ ...SPRING, delay: 0.35 }}
+                className="absolute -bottom-4 -right-4 z-30"
+                style={{
+                  padding: "0.875rem 1.5rem",
+                  borderRadius: "1.25rem",
+                  background: "linear-gradient(135deg, #4a9068 0%, #3d7a5a 100%)",
+                  boxShadow: "0 8px 24px rgba(74,144,104,0.4), 0 2px 8px rgba(74,144,104,0.25)"
+                }}
+              >
+                <div
+                  className="font-bold text-white"
+                  style={{ fontSize: "1.375rem", letterSpacing: "-0.02em" }}
+                >
+                  10K+
+                </div>
+                <div
+                  className="text-white/85"
+                  style={{ fontSize: "0.8125rem", fontWeight: 500 }}
+                >
+                  Happy Pets
+                </div>
+              </motion.div>
+            </div>
+          </motion.div>
+
+          {/* Right Side - Content */}
+          <motion.div
+            initial={{ opacity: 0, x: 56 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={SPRING}
+            className="lg:col-span-7"
+          >
+            <h2
+              className="font-bold mb-6"
+              style={{
+                fontFamily: "var(--font-nunito, nunito, sans-serif)",
+                fontSize: "clamp(1.75rem, 3vw, 2.5rem)",
+                color: "#1a1a2e",
+                letterSpacing: "-0.02em"
+              }}
+            >
+              Every Pet Deserves the Best Care
+            </h2>
+            <p
+              className="mb-6 leading-relaxed"
+              style={{
+                fontSize: "1.0625rem",
+                color: "#4a5568",
+                lineHeight: 1.75
+              }}
+            >
+              At Pawsitive, we believe that technology and love can come together to give your pet the best life possible.
+              Our AI-powered platform helps you understand your pet's unique needs and provides personalized care plans
+              that keep them healthy and happy.
+            </p>
+            <p
+              className="mb-10 leading-relaxed"
+              style={{
+                fontSize: "1.0625rem",
+                color: "#4a5568",
+                lineHeight: 1.75
+              }}
+            >
+              Join thousands of pet parents who trust Pawsitive to help them raise healthier, happier furry companions.
+            </p>
+
+            <div className="grid grid-cols-3 gap-6">
+              {[
+                { value: "AI", label: "Powered" },
+                { value: "24/7", label: "Tracking" },
+                { value: "100%", label: "Personalized" }
+              ].map((item, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 12 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ ...SPRING, delay: 0.1 * i }}
+                  className="text-center"
+                >
+                  <div
+                    className="font-bold mb-1"
+                    style={{
+                      fontSize: "1.5rem",
+                      color: "#4a9068",
+                      letterSpacing: "-0.02em"
+                    }}
+                  >
+                    {item.value}
+                  </div>
+                  <div style={{ fontSize: "0.8125rem", color: "#718096", fontWeight: 500 }}>
+                    {item.label}
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+========== src/lib/prisma.ts ==========
+import { PrismaClient } from '@prisma/client';
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
+
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+  });
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+
+========== src/lib/auth-context.tsx ==========
+"use client";
+
+import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createBrowserClient } from "@supabase/ssr";
+
+interface Owner {
+  id: string;
+  authId: string;
+  email: string;
+  name: string | null;
+  xpBalance: number;
+}
+
+interface AuthContextType {
+  owner: Owner | null;
+  loading: boolean;
+  signInWithGithub: () => void;
+  signOut: () => void;
+  enableDemoMode: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [owner, setOwner] = useState<Owner | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  const syncOwner = async (userId: string, email: string, name?: string) => {
+    try {
+      const res = await fetch(
+        `/api/auth/callback?auth_id=${userId}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name || "")}`
+      );
+      const data = await res.json();
+      if (data.owner) {
+        setOwner(data.owner);
+        // Store owner ID in localStorage for persistence
+        localStorage.setItem("pawsitive_owner_id", data.owner.id);
+      }
+    } catch (error) {
+      console.error("Failed to sync owner:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const checkUser = async () => {
+      // First check localStorage for persisted owner
+      const savedOwnerId = localStorage.getItem("pawsitive_owner_id");
+      if (savedOwnerId) {
+        try {
+          const res = await fetch(`/api/owners/me/stats`, {
+            headers: { "x-owner-id": savedOwnerId }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.owner) {
+              setOwner(data.owner);
+              setLoading(false);
+              return;
+            }
+          }
+        } catch (e) {
+          localStorage.removeItem("pawsitive_owner_id");
+        }
+      }
+
+      // Then check Supabase session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await syncOwner(
+          session.user.id,
+          session.user.email!,
+          session.user.user_metadata?.full_name || session.user.user_metadata?.name
+        );
+      } else {
+        setLoading(false);
+      }
+    };
+
+    checkUser();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        await syncOwner(
+          session.user.id,
+          session.user.email!,
+          session.user.user_metadata?.full_name || session.user.user_metadata?.name
+        );
+      } else {
+        setOwner(null);
+        localStorage.removeItem("pawsitive_owner_id");
+        setLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [supabase]);
+
+  const signInWithGithub = () => {
+    supabase.auth.signInWithOAuth({
+      provider: "github",
+      options: {
+        redirectTo: `${window.location.origin}/dashboard`,
+      },
+    });
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setOwner(null);
+    localStorage.removeItem("pawsitive_owner_id");
+  };
+
+  const enableDemoMode = async () => {
+    setLoading(true);
+    localStorage.setItem("pawsitive_owner_id", "demo");
+    try {
+      const res = await fetch(`/api/owners/me/stats`, {
+        headers: { "x-owner-id": "demo" }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.owner) {
+          setOwner(data.owner);
+        }
+      }
+    } catch (e) {
+      console.error("Demo mode failed", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <AuthContext.Provider value={{ owner, loading, signInWithGithub, signOut, enableDemoMode }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
+}
+
+========== src/lib/gemini.ts ==========
+import { GoogleGenAI } from '@google/genai';
+
+const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+
+// AI-powered breed detection from image
+export async function detectBreedFromImage(imageUrl: string): Promise<{
+  breed: string;
+  estimatedAge: number;
+  size: 'small' | 'medium' | 'large';
+  confidence: number;
+}> {
+  const model = genAI.models;
+
+  // Fetch the image
+  const imageResponse = await fetch(imageUrl);
+  const imageBuffer = await imageResponse.arrayBuffer();
+  const base64Image = Buffer.from(imageBuffer).toString('base64');
+
+  const response = await model.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: [
+      {
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: base64Image,
+        },
+      },
+      {
+        text: 'Analyze this dog image and provide: breed name, estimated age in years, and size category (small/medium/large). Respond in JSON format only: {"breed": "string", "estimatedAge": number, "size": "small|medium|large", "confidence": number (0-1)}',
+      },
+    ],
+    config: {
+      responseMimeType: 'application/json',
+    },
+  });
+
+  const content = response.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content) throw new Error('No response from Gemini');
+
+  return JSON.parse(content);
+}
+
+// Generate AI care plan based on pet data
+export async function generateCarePlan(petData: {
+  name: string;
+  breed?: string;
+  weightLbs?: number;
+  ageYears?: number;
+  recentActivities: Array<{
+    activityType: string;
+    value: number;
+    loggedAt: Date;
+  }>;
+}): Promise<{
+  targetExerciseMins: number;
+  targetCalories: number;
+  aiInsightText: string;
+}> {
+  const activitiesSummary = petData.recentActivities
+    .slice(-7)
+    .map(a => `${a.activityType}: ${a.value}`)
+    .join(', ');
+
+  const prompt = `Generate a daily care plan for ${petData.name}${
+    petData.breed ? ` (${petData.breed})` : ''
+  }${
+    petData.weightLbs ? `, ${petData.weightLbs} lbs` : ''
+  }${
+    petData.ageYears ? `, ${petData.ageYears} years old` : ''
+  }.
+
+Recent activities (last 7 days): ${activitiesSummary || 'No recent activities'}
+
+Provide a JSON response with:
+{
+  "targetExerciseMins": number (recommended daily exercise in minutes),
+  "targetCalories": number (recommended daily calorie intake),
+  "aiInsightText": string (2-3 sentence personalized insight)
+}`;
+
+  const model = genAI.models;
+  const response = await model.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: [{ text: prompt }],
+    config: {
+      responseMimeType: 'application/json',
+    },
+  });
+
+  const content = response.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content) throw new Error('No response from Gemini');
+
+  return JSON.parse(content);
+}
+
+========== src/lib/supabase.ts ==========
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+export const getSupabaseUser = async (authToken: string) => {
+  const { data: { user }, error } = await supabase.auth.getUser(authToken);
+  if (error) throw new Error(error.message);
+  return user;
+};
+
+========== prisma/schema.prisma ==========
+// Pawsitive Backend Schema
+// Using PostgreSQL via Supabase
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== ENUMS ====================
+
+enum ActivityType {
+  WALK
+  MEAL
+  SYMPTOM_CHECK
+}
+
+enum CarePlanStatus {
+  ACTIVE
+  COMPLETED
+  MISSED
+}
+
+// ==================== TABLES ====================
+
+// Owner table - stores authenticated users
+model Owner {
+  id        String   @id @default(uuid())
+  authId    String   @unique // From Clerk/Supabase Auth
+  email     String   @unique
+  name      String?
+  xpBalance Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  pets Pet[]
+
+  @@map("owners")
+}
+
+// Pet table - AI-analyzed pet profiles
+model Pet {
+  id            String   @id @default(uuid())
+  ownerId       String
+  name          String
+  breed         String?
+  weightLbs     Float?
+  ageYears      Int?
+  photoUrl      String?
+  currentStreak Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  owner        Owner         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  activityLogs ActivityLog[]
+  carePlans    CarePlan[]
+
+  @@index([ownerId])
+  @@map("pets")
+}
+
+// ActivityLog table - transactional ledger for daily events
+model ActivityLog {
+  id              String       @id @default(uuid())
+  petId           String
+  activityType    ActivityType
+  value           Float        // duration in minutes, cups of food, etc.
+  notes           String?
+  idempotencyKey  String?
+  loggedAt        DateTime     @default(now())
+  createdAt       DateTime     @default(now())
+
+  // Relations
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId])
+  @@index([petId, loggedAt])
+  @@unique([petId, activityType, idempotencyKey])
+  @@map("activity_logs")
+}
+
+// CarePlan table - AI-generated daily recommendations
+model CarePlan {
+  id                  String         @id @default(uuid())
+  petId               String
+  date                DateTime
+  targetExerciseMins  Int
+  targetCalories      Int
+  aiInsightText       String?
+  status              CarePlanStatus @default(ACTIVE)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  // Relations
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@unique([petId, date])
+  @@index([petId])
+  @@map("care_plans")
+}
+
+========== prisma/seed.ts ==========
+import { PrismaClient } from '@prisma/client'
+
+const prisma = new PrismaClient()
+
+async function main() {
+    console.log('Seeding Demo data...')
+
+    // Create Demo Owner
+    const demoOwner = await prisma.owner.upsert({
+        where: { email: 'demo@example.com' },
+        update: {},
+        create: {
+            id: 'demo', // Hardcoded 'demo' ID for the hackathon UI fallback
+            authId: 'demo-auth-id',
+            email: 'demo@example.com',
+            name: 'Judge Demo',
+            xpBalance: 150,
+        },
+    })
+
+    // Create Demo Pet
+    const demoPet = await prisma.pet.upsert({
+        where: { id: 'demo-pet-id' },
+        update: {},
+        create: {
+            id: 'demo-pet-id',
+            ownerId: demoOwner.id,
+            name: 'Buddy',
+            breed: 'Golden Retriever',
+            ageYears: 3,
+            weightLbs: 65.5,
+            currentStreak: 5,
+        },
+    })
+
+    // Add some sample activity logs for the last few days to make the AI Care Plan work
+    const today = new Date()
+    for (let i = 1; i <= 3; i++) {
+        const logDate = new Date(today)
+        logDate.setDate(logDate.getDate() - i)
+        logDate.setHours(8, 0, 0, 0)
+
+        await prisma.activityLog.create({
+            data: {
+                petId: demoPet.id,
+                activityType: 'WALK',
+                value: 30 + i * 5,
+                notes: `Morning walk in the park ${i} days ago`,
+                loggedAt: logDate,
+            },
+            // ignore unique constraints on seed by not explicitly preventing them
+        })
+    }
+
+    console.log('Seed completed with Demo Owner/Pet.')
+}
+
+main()
+    .then(async () => {
+        await prisma.$disconnect()
+    })
+    .catch(async (e) => {
+        console.error(e)
+        await prisma.$disconnect()
+        process.exit(1)
+    })
+

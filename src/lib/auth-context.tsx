@@ -16,6 +16,7 @@ interface AuthContextType {
   loading: boolean;
   signInWithGithub: () => void;
   signOut: () => void;
+  enableDemoMode: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -53,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const savedOwnerId = localStorage.getItem("pawsitive_owner_id");
       if (savedOwnerId) {
         try {
-          const res = await fetch(`/api/owner/stats`, {
+          const res = await fetch(`/api/owners/me/stats`, {
             headers: { "x-owner-id": savedOwnerId }
           });
           if (res.ok) {
@@ -116,8 +117,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("pawsitive_owner_id");
   };
 
+  const enableDemoMode = async () => {
+    setLoading(true);
+    localStorage.setItem("pawsitive_owner_id", "demo");
+    try {
+      const res = await fetch(`/api/owners/me/stats`, {
+        headers: { "x-owner-id": "demo" }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.owner) {
+          setOwner(data.owner);
+        }
+      }
+    } catch (e) {
+      console.error("Demo mode failed", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ owner, loading, signInWithGithub, signOut }}>
+    <AuthContext.Provider value={{ owner, loading, signInWithGithub, signOut, enableDemoMode }}>
       {children}
     </AuthContext.Provider>
   );

@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 const SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
 
 export default function Navbar() {
-  const { owner, loading, signInWithGithub, signOut } = useAuth();
+  const { owner, loading, signInWithGithub, signOut, enableDemoMode } = useAuth();
   const router = useRouter();
 
   return (
@@ -82,7 +82,7 @@ export default function Navbar() {
             ) : owner ? (
               // Logged in state
               <div className="flex items-center gap-4">
-                <span 
+                <span
                   className="font-medium text-sm"
                   style={{ color: "#4a5568" }}
                 >
@@ -107,6 +107,13 @@ export default function Navbar() {
             ) : (
               // Logged out state
               <>
+                <button
+                  onClick={async () => { await enableDemoMode(); router.push('/dashboard'); }}
+                  className="text-[0.7rem] font-medium transition-colors hover:text-[#4a9068] mr-2"
+                  style={{ color: "#9ca3af" }}
+                >
+                  Judge Demo
+                </button>
                 <motion.button
                   whileHover={{ scale: 1.03, y: -1 }}
                   whileTap={{ scale: 0.97 }}
@@ -121,7 +128,7 @@ export default function Navbar() {
                   whileHover={{ scale: 1.04, y: -2 }}
                   whileTap={{ scale: 0.96 }}
                   transition={SPRING}
-                  onClick={() => router.push("/dashboard")}
+                  onClick={signInWithGithub}
                   className="font-bold text-white rounded-full"
                   style={{
                     backgroundColor: "#4a9068",
