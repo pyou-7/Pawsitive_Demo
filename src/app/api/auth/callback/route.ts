@@ -9,8 +9,10 @@ export async function GET(request: NextRequest) {
     const email = searchParams.get('email');
     const name = searchParams.get('name');
 
+    console.log("Auth callback:", { authId, email, name });
+
     if (!authId || !email) {
-      return NextResponse.json({ error: 'Missing auth parameters' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing auth parameters', received: Object.fromEntries(searchParams) }, { status: 400 });
     }
 
     // Find or create owner based on auth
@@ -31,6 +33,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ owner });
   } catch (error) {
     console.error('Auth callback error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error', details: String(error) }, { status: 500 });
   }
 }

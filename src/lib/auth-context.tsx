@@ -32,17 +32,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const syncOwner = async (userId: string, email: string, name?: string) => {
     try {
+      console.log("Syncing owner:", { userId, email, name });
       const res = await fetch(
         `/api/auth/callback?auth_id=${userId}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name || "")}`
       );
       const data = await res.json();
+      console.log("Sync response:", res.status, data);
       if (data.owner) {
         setOwner(data.owner);
         // Store owner ID in localStorage for persistence
         localStorage.setItem("pawsitive_owner_id", data.owner.id);
+      } else if (data.error) {
+        console.error("Owner sync error:", data.error);
+        alert(`Auth sync error: ${data.error}`);
       }
     } catch (error) {
       console.error("Failed to sync owner:", error);
+      alert(`Failed to sync owner: ${error}`);
     } finally {
       setLoading(false);
     }
@@ -70,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Then check Supabase session
+      // Then check Supabase session (including OAuth callback)
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         await syncOwner(
@@ -79,6 +85,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           session.user.user_metadata?.full_name || session.user.user_metadata?.name
         );
       } else {
+        // Check if this is an OAuth callback by looking for code in URL
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+        
+        if (accessToken && refreshToken) {
+          // Set session from OAuth callback
+          await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+          });
+          // Now get the session again
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            await syncOwner(
+              session.user.id,
+              session.user.email!,
+              session.user.user_metadata?.full_name || session.user.user_metadata?.name
+            );
+            return;
+          }
+        }
         setLoading(false);
       }
     };
@@ -102,13 +130,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, [supabase]);
 
-  const signInWithGithub = () => {
-    supabase.auth.signInWithOAuth({
+  const signInWithGithub = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "github",
       options: {
         redirectTo: `${window.location.origin}/dashboard`,
+        scopes: 'read:user user:email',
       },
     });
+    if (error) {
+      console.error("GitHub sign-in error:", error.message);
+      alert(`Sign-in failed: ${error.message}`);
+    }
   };
 
   const signOut = async () => {
