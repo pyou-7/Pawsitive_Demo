@@ -29,39 +29,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
+  const syncOwner = async (userId: string, email: string, name?: string) => {
+    try {
+      const res = await fetch(
+        `/api/auth/callback?auth_id=${userId}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name || "")}`
+      );
+      const data = await res.json();
+      if (data.owner) {
+        setOwner(data.owner);
+        // Store owner ID in localStorage for persistence
+        localStorage.setItem("pawsitive_owner_id", data.owner.id);
+      }
+    } catch (error) {
+      console.error("Failed to sync owner:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    // Check for existing session
     const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.email) {
-        // Fetch or create owner in our database
-        const res = await fetch(
-          `/api/auth/callback?auth_id=${session.user.id}&email=${session.user.email}&name=${session.user.user_metadata?.full_name || ""}`
-        );
-        const data = await res.json();
-        if (data.owner) {
-          setOwner(data.owner);
+      // First check localStorage for persisted owner
+      const savedOwnerId = localStorage.getItem("pawsitive_owner_id");
+      if (savedOwnerId) {
+        try {
+          const res = await fetch(`/api/owner/stats`, {
+            headers: { "x-owner-id": savedOwnerId }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.owner) {
+              setOwner(data.owner);
+              setLoading(false);
+              return;
+            }
+          }
+        } catch (e) {
+          localStorage.removeItem("pawsitive_owner_id");
         }
       }
-      setLoading(false);
+
+      // Then check Supabase session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await syncOwner(
+          session.user.id,
+          session.user.email!,
+          session.user.user_metadata?.full_name || session.user.user_metadata?.name
+        );
+      } else {
+        setLoading(false);
+      }
     };
 
     checkUser();
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user?.email) {
-        const res = await fetch(
-          `/api/auth/callback?auth_id=${session.user.id}&email=${session.user.email}&name=${session.user.user_metadata?.full_name || ""}`
+      if (session?.user) {
+        await syncOwner(
+          session.user.id,
+          session.user.email!,
+          session.user.user_metadata?.full_name || session.user.user_metadata?.name
         );
-        const data = await res.json();
-        if (data.owner) {
-          setOwner(data.owner);
-        }
       } else {
         setOwner(null);
+        localStorage.removeItem("pawsitive_owner_id");
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
@@ -71,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.signInWithOAuth({
       provider: "github",
       options: {
-        redirectTo: `${window.location.origin}/`,
+        redirectTo: `${window.location.origin}/dashboard`,
       },
     });
   };
@@ -79,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     await supabase.auth.signOut();
     setOwner(null);
+    localStorage.removeItem("pawsitive_owner_id");
   };
 
   return (
